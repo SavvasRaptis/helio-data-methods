@@ -57,7 +57,7 @@ during a Jupyter Book build; verified outputs are stored in the notebooks.
 
 The environment is locked with `uv.lock`. Continuous integration validates the
 book structure, runs the test suite, builds the book with warnings treated as
-errors, and smoke-tests every published notebook.
+errors, and checks every published notebook.
 
 ## License
 

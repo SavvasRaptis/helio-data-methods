@@ -66,7 +66,6 @@ def main() -> None:
         }
         previous = {key: os.environ.get(key) for key in environment}
         os.environ.update(environment)
-        os.environ.pop("HELIO_FAST_RUN", None)
         try:
             for path in paths:
                 notebook = nbformat.read(path, as_version=4)

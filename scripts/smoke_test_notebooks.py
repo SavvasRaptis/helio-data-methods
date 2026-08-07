@@ -59,7 +59,9 @@ def reduce_notebook_for_test(
 
     is_general_ml = "general-ml" in path.parts
     is_dst = "dst-forecasting" in path.parts
-    if not is_general_ml and not is_dst:
+    is_sep = "sep-occurrence-forecasting" in path.parts
+    is_coronal = "coronal-loop-reconstruction" in path.parts
+    if not any((is_general_ml, is_dst, is_sep, is_coronal)):
         return
 
     replacements = {
@@ -75,6 +77,12 @@ def reduce_notebook_for_test(
         "EXAMPLE_ROUNDS = 50  # Reduce to 10 or 25 for a quicker comparison.": (
             "EXAMPLE_ROUNDS = 10"
         ),
+        "EPOCHS = 40  # Reduce to 5 or 10 for a quicker run.": "EPOCHS = 1",
+        "ROUNDS = 300  # Reduce to 50 or 100 for a quicker run.": "ROUNDS = 20",
+        "N_SPLITS = 5  # Reduce to 2 for a quicker validation run.": "N_SPLITS = 2",
+        "N_REPEATS = 3  # Reduce to 1 for a quicker validation run.": "N_REPEATS = 1",
+        "ROUNDS = 200  # Reduce to 20 or 50 for a quicker validation run.": "ROUNDS = 20",
+        "EPOCHS = 10  # Reduce to 3 or 5 for a quicker run.": "EPOCHS = 1",
     }
     cifar = any(
         part in {"cifar10-cnn-progression", "transfer-learning"}
@@ -129,6 +137,36 @@ def reduce_notebook_for_test(
                 "time_test = time_test[:2000]\n\n"
                 "scaler = StandardScaler().fit(x_train_raw)",
                 1,
+            )
+        if is_sep and "x_train_raw = x_supplied_train[train_indices]" in source:
+            source = source.replace(
+                "x_train_raw = x_supplied_train[train_indices]",
+                "train_indices, _ = train_test_split(\n"
+                "    train_indices, train_size=min(4000, len(train_indices)),\n"
+                "    random_state=SEED, stratify=y_supplied_train[train_indices],\n"
+                ")\n"
+                "validation_indices, _ = train_test_split(\n"
+                "    validation_indices, train_size=min(1200, len(validation_indices)),\n"
+                "    random_state=SEED, stratify=y_supplied_train[validation_indices],\n"
+                ")\n\n"
+                "x_train_raw = x_supplied_train[train_indices]",
+                1,
+            )
+        if is_coronal and "point_slice = slice(None)" in source:
+            source = source.replace(
+                "point_slice = slice(None)", "point_slice = slice(None, None, 10)"
+            )
+            source = source.replace(
+                "train_indices = np.arange(0, 3000)",
+                "train_indices = np.arange(0, 300)",
+            )
+            source = source.replace(
+                "validation_indices = np.arange(3000, 3750)",
+                "validation_indices = np.arange(3000, 3150)",
+            )
+            source = source.replace(
+                "test_indices = np.arange(3750, 5000)",
+                "test_indices = np.arange(3750, 3900)",
             )
         cell.source = source
 
@@ -241,7 +279,6 @@ def main() -> None:
             os.getenv("HELIO_SMOKE_CACHE", ROOT / ".helio-cache")
         ).expanduser()
         environment = {
-            "HELIO_FAST_RUN": "1",
             "HELIO_DATA_CACHE": str(cache_root / "heliophysics"),
             "HELIO_DATA_DIR": str(cache_root / "torchvision"),
             "KERAS_HOME": str(cache_root / "keras"),

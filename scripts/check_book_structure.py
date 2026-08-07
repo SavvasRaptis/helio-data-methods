@@ -446,6 +446,12 @@ def validate_repository(root: Path) -> list[str]:
         )
         if "HELIO_COMPARISON" in all_cell_source:
             errors.append(f"{relative}: retired HELIO_COMPARISON evidence is forbidden")
+        if "HELIO_FAST_RUN" in all_cell_source or re.search(
+            r"\bFAST_RUN\b", all_cell_source
+        ):
+            errors.append(
+                f"{relative}: reader-facing fast-run environment switches are forbidden"
+            )
         if re.search(r"\bTODO\b", all_cell_source):
             errors.append(f"{relative}: TODO exercise language is forbidden")
         if re.search(

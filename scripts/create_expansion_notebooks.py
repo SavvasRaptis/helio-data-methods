@@ -2348,7 +2348,6 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
 SEED = 42
-FAST_RUN = os.getenv("HELIO_FAST_RUN", "0") == "1"
 random.seed(SEED)
 np.random.seed(SEED)
 """
@@ -2368,20 +2367,6 @@ train_indices, validation_indices = train_test_split(
     random_state=SEED,
     stratify=y_supplied_train,
 )
-if FAST_RUN:
-    train_indices, _ = train_test_split(
-        train_indices,
-        train_size=min(4000, len(train_indices)),
-        random_state=SEED,
-        stratify=y_supplied_train[train_indices],
-    )
-    validation_indices, _ = train_test_split(
-        validation_indices,
-        train_size=min(1200, len(validation_indices)),
-        random_state=SEED,
-        stratify=y_supplied_train[validation_indices],
-    )
-
 x_train_raw = x_supplied_train[train_indices]
 y_train = y_supplied_train[train_indices]
 x_validation_raw = x_supplied_train[validation_indices]
@@ -2475,8 +2460,8 @@ as supplied. The 49 predictors are anonymous, and the archive has no event IDs
 or timestamps. Consequently, this is sample-level teaching evidence: it cannot
 establish event-aware generalization or physical feature attribution.
 
-Set `HELIO_FAST_RUN=1` for a one-epoch smoke run. In Colab, choose
-**Runtime → Run all**; the bootstrap downloads and verifies only four pickles.
+In Colab, choose **Runtime → Run all**; the bootstrap downloads and verifies
+only four pickles.
 """
         ),
         md("## Imports and deterministic configuration"),
@@ -2499,6 +2484,7 @@ import keras
 import torch
 from keras import layers
 
+EPOCHS = 40  # Reduce to 5 or 10 for a quicker run.
 keras.utils.set_random_seed(SEED)
 torch.use_deterministic_algorithms(True)  # Prefer repeatable operations when available.
 assert keras.backend.backend() == "torch"
@@ -2521,7 +2507,7 @@ history = model.fit(
     x_train,
     y_train,
     validation_data=(x_validation, y_validation),
-    epochs=1 if FAST_RUN else 40,
+    epochs=EPOCHS,
     batch_size=256,  # Number of samples used for each parameter update.
     class_weight={0: class_weights[0], 1: class_weights[1]},
     callbacks=[
@@ -2557,6 +2543,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
+EPOCHS = 40  # Reduce to 5 or 10 for a quicker run.
 torch.manual_seed(SEED)
 torch.use_deterministic_algorithms(True, warn_only=True)  # Prefer repeatable operations when available.
 DEVICE = torch.device(
@@ -2586,7 +2573,7 @@ loader = DataLoader(
 )
 training_losses, validation_losses = [], []
 best_state, best_loss, patience_left = None, float("inf"), 5
-for epoch in range(1 if FAST_RUN else 40):
+for epoch in range(EPOCHS):
     model.train()
     batch_losses = []
     for batch_x, batch_y in loader:
@@ -2648,8 +2635,9 @@ plt.show()
 SEP_XGB_TRAIN = r"""
 from xgboost import XGBClassifier
 
+ROUNDS = 300  # Reduce to 50 or 100 for a quicker run.
 model = XGBClassifier(
-    n_estimators=20 if FAST_RUN else 300,
+    n_estimators=ROUNDS,
     max_depth=6,
     learning_rate=0.05,
     subsample=0.8,
@@ -2679,8 +2667,6 @@ def sep_framework_neutral_cells(kind: str) -> list[nbformat.NotebookNode]:
 The archived 49 predictors are anonymous and have no timestamps or event IDs.
 Every result below is therefore sample-level teaching evidence, not an
 event-aware forecast claim or a physical attribution.
-
-Set `HELIO_FAST_RUN=1` for the reduced smoke configuration.
 """
         ),
         md("## Imports and deterministic configuration"),
@@ -2699,10 +2685,13 @@ Set `HELIO_FAST_RUN=1` for the reduced smoke configuration.
 from sklearn.model_selection import RepeatedStratifiedKFold
 from xgboost import XGBClassifier
 
+N_SPLITS = 5  # Reduce to 2 for a quicker validation run.
+N_REPEATS = 3  # Reduce to 1 for a quicker validation run.
+ROUNDS = 200  # Reduce to 20 or 50 for a quicker validation run.
 features = scaler.fit_transform(x_supplied_train).astype(np.float32)
 folds = RepeatedStratifiedKFold(
-    n_splits=2 if FAST_RUN else 5,
-    n_repeats=1 if FAST_RUN else 3,
+    n_splits=N_SPLITS,
+    n_repeats=N_REPEATS,
     random_state=SEED,
 )
 scores = []
@@ -2715,7 +2704,7 @@ for fold, (fold_train, fold_validation) in enumerate(
     fold_y_train = y_supplied_train[fold_train]
     fold_counts = np.bincount(fold_y_train, minlength=2)
     fold_model = XGBClassifier(
-        n_estimators=20 if FAST_RUN else 200,
+        n_estimators=ROUNDS,
         max_depth=6,
         learning_rate=0.05,
         subsample=0.8,
@@ -2894,7 +2883,6 @@ import numpy as np
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 SEED = 42
-FAST_RUN = os.getenv("HELIO_FAST_RUN", "0") == "1"
 random.seed(SEED)
 np.random.seed(SEED)
 """
@@ -2907,10 +2895,10 @@ length = np.load(dataset_files["LNGTH_L2D.npy"]).astype(np.float32)
 footpoint_distance = np.load(dataset_files["DST2D_FP.npy"]).astype(np.float32)
 top_angle = np.load(dataset_files["angle_top.npy"]).astype(np.float32)
 
-point_slice = slice(None, None, 10) if FAST_RUN else slice(None)
-train_indices = np.arange(0, 300 if FAST_RUN else 3000)
-validation_indices = np.arange(3000, 3150 if FAST_RUN else 3750)
-test_indices = np.arange(3750, 3900 if FAST_RUN else 5000)
+point_slice = slice(None)
+train_indices = np.arange(0, 3000)
+validation_indices = np.arange(3000, 3750)
+test_indices = np.arange(3750, 5000)
 
 
 def assemble(indices):
@@ -3040,8 +3028,8 @@ overlapping split in the legacy notebook: loops 0–2999 train, 3000–3749
 validate, and 3750–4999 form the untouched final test set. All normalization is
 fit on training loops only.
 
-Set `HELIO_FAST_RUN=1` to use fewer loops and every tenth point. In Colab,
-choose **Runtime → Run all**; the bootstrap verifies each archived array.
+In Colab, choose **Runtime → Run all**; the bootstrap verifies each archived
+array.
 """
         ),
         md("## Imports and deterministic configuration"),
@@ -3062,6 +3050,7 @@ import keras
 import torch
 from keras import layers
 
+EPOCHS = 10  # Reduce to 3 or 5 for a quicker run.
 keras.utils.set_random_seed(SEED)
 torch.use_deterministic_algorithms(True)
 assert keras.backend.backend() == "torch"
@@ -3083,7 +3072,7 @@ history = model.fit(
     x_train,
     y_train,
     validation_data=(x_validation, y_validation),
-    epochs=1 if FAST_RUN else 10,
+    epochs=EPOCHS,
     batch_size=32,
     callbacks=[
         keras.callbacks.EarlyStopping(
@@ -3109,6 +3098,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
+EPOCHS = 10  # Reduce to 3 or 5 for a quicker run.
 torch.manual_seed(SEED)
 torch.use_deterministic_algorithms(True, warn_only=True)
 DEVICE = torch.device(
@@ -3151,7 +3141,7 @@ loader = DataLoader(
 )
 training_losses, validation_losses = [], []
 best_state, best_loss, patience_left = None, float("inf"), 2
-for epoch in range(1 if FAST_RUN else 10):
+for epoch in range(EPOCHS):
     model.train()
     batch_losses = []
     for batch_x, batch_y in loader:

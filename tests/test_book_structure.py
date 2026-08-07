@@ -84,6 +84,16 @@ def test_retired_teaching_artifacts_are_absent() -> None:
     assert retired == []
 
 
+def test_notebooks_do_not_expose_fast_run_environment_switches() -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    for track in ("general-ml", "heliophysics"):
+        for path in (repository_root / track).rglob("*.ipynb"):
+            notebook = nbformat.read(path, 4)
+            source = "\n".join(cell.source for cell in notebook.cells)
+            assert "HELIO_FAST_RUN" not in source
+            assert "FAST_RUN" not in source
+
+
 def test_keras_workflows_offer_suggestions_without_duplicate_studies() -> None:
     repository_root = Path(__file__).resolve().parents[1]
     for path in repository_root.glob("general-ml/**/keras/demo.ipynb"):
