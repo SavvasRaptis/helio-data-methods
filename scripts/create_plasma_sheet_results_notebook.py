@@ -265,7 +265,7 @@ cells = [
             1, 2, figsize=(12.2, 5.2), sharex=True, sharey=True,
             constrained_layout=True,
         )
-        count_norm = LogNorm(vmin=20, vmax=400)
+        count_norm = LogNorm(vmin=20, vmax=400)  # Share one logarithmic count scale.
         hexbin = None
 
         for axis, (model, predicted) in zip(axes, predictions.items()):
@@ -337,7 +337,7 @@ cells = [
     code(
         r"""
         # Change this key to explore another stored solar-wind condition.
-        DENSITY_CASE_KEY = "high_density_northward"
+        DENSITY_CASE_KEY = "high_density_northward"  # 20 cm^-3 and +5 nT.
 
         x_edges = results["x_edges_re"]
         y_edges = results["y_edges_re"]
@@ -372,7 +372,7 @@ cells = [
         )
         density_mesh = None
         for axis, (model, grid) in zip(axes, density_maps.items()):
-            density_mesh = axis.pcolormesh(
+            density_mesh = axis.pcolormesh(  # Use one color scale for a direct comparison.
                 x_edges, y_edges, grid, cmap="viridis",
                 vmin=0.0, vmax=1.4, shading="flat",
             )

@@ -291,7 +291,7 @@ SEED = 42
 HISTORY_HOURS = HISTORY_HOURS_SETTING
 HORIZON_HOURS = 3
 EPOCHS = 10  # Reduce to 1 or 2 for a quicker run.
-BATCH_SIZE = 128
+BATCH_SIZE = 128  # Number of hourly windows used for each parameter update.
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -502,7 +502,7 @@ import torch
 from keras import layers
 
 keras.utils.set_random_seed(SEED)
-torch.use_deterministic_algorithms(True)
+torch.use_deterministic_algorithms(True)  # Prefer repeatable operations when available.
 assert keras.backend.backend() == "torch"
 model = keras.Sequential(
     [
@@ -513,7 +513,10 @@ model = keras.Sequential(
     ],
     name="dst_forecast",
 )
-model.compile(optimizer=keras.optimizers.Adam(), loss="mse")
+model.compile(
+    optimizer=keras.optimizers.Adam(),  # Adam updates the model weights.
+    loss="mse",  # Mean-squared error for the continuous Dst target.
+)
 model.summary()
 """
                 ),
@@ -563,7 +566,7 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 torch.manual_seed(SEED)
-torch.use_deterministic_algorithms(True)
+torch.use_deterministic_algorithms(True)  # Prefer repeatable operations when available.
 DEVICE = torch.device(
     "cuda" if torch.cuda.is_available()
     else "mps" if torch.backends.mps.is_available()
@@ -587,8 +590,8 @@ class DstRegressor(nn.Module):
 
 
 model = DstRegressor(x_train.shape[1]).to(DEVICE)
-optimizer = torch.optim.Adam(model.parameters())
-loss_function = nn.MSELoss()
+optimizer = torch.optim.Adam(model.parameters())  # Adam updates the model weights.
+loss_function = nn.MSELoss()  # Mean-squared error for the continuous Dst target.
 print(model)
 """
                 ),
@@ -2497,7 +2500,7 @@ import torch
 from keras import layers
 
 keras.utils.set_random_seed(SEED)
-torch.use_deterministic_algorithms(True)
+torch.use_deterministic_algorithms(True)  # Prefer repeatable operations when available.
 assert keras.backend.backend() == "torch"
 model = keras.Sequential(
     [
@@ -2510,8 +2513,8 @@ model = keras.Sequential(
     ]
 )
 model.compile(
-    optimizer=keras.optimizers.Adam(),
-    loss="binary_crossentropy",
+    optimizer=keras.optimizers.Adam(),  # Adam updates the model weights.
+    loss="binary_crossentropy",  # Binary classification error.
     metrics=["accuracy"],
 )
 history = model.fit(
@@ -2519,7 +2522,7 @@ history = model.fit(
     y_train,
     validation_data=(x_validation, y_validation),
     epochs=1 if FAST_RUN else 40,
-    batch_size=256,
+    batch_size=256,  # Number of samples used for each parameter update.
     class_weight={0: class_weights[0], 1: class_weights[1]},
     callbacks=[
         keras.callbacks.EarlyStopping(
@@ -2555,7 +2558,7 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 torch.manual_seed(SEED)
-torch.use_deterministic_algorithms(True, warn_only=True)
+torch.use_deterministic_algorithms(True, warn_only=True)  # Prefer repeatable operations when available.
 DEVICE = torch.device(
     "cuda" if torch.cuda.is_available()
     else "mps" if torch.backends.mps.is_available()
@@ -2573,11 +2576,11 @@ model = nn.Sequential(
 positive_weight = torch.tensor(
     [counts[0] / max(counts[1], 1)], dtype=torch.float32, device=DEVICE
 )
-loss_function = nn.BCEWithLogitsLoss(pos_weight=positive_weight)
-optimizer = torch.optim.Adam(model.parameters())
+loss_function = nn.BCEWithLogitsLoss(pos_weight=positive_weight)  # Weighted binary classification error.
+optimizer = torch.optim.Adam(model.parameters())  # Adam updates the model weights.
 loader = DataLoader(
     TensorDataset(torch.from_numpy(x_train), torch.from_numpy(y_train).float()),
-    batch_size=256,
+    batch_size=256,  # Number of samples used for each parameter update.
     shuffle=True,
     generator=torch.Generator().manual_seed(SEED),
 )

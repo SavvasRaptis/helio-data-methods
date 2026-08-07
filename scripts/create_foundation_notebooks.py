@@ -115,10 +115,10 @@ print("runtime dependency check passed")
 COMMON_DATA_KERAS = """
 SEED = 42
 EPOCHS = 5  # Reduce to 1 or 2 for a quicker run.
-BATCH_SIZE = 128
+BATCH_SIZE = 128  # Number of images used for each parameter update.
 
 keras.utils.set_random_seed(SEED)
-torch.use_deterministic_algorithms(True)
+torch.use_deterministic_algorithms(True)  # Prefer repeatable operations when available.
 
 (x_development, y_development), (x_test, y_test) = keras.datasets.mnist.load_data()
 all_indices = np.arange(len(y_development))
@@ -150,12 +150,12 @@ print(
 COMMON_DATA_TORCH = """
 SEED = 42
 EPOCHS = 5  # Reduce to 1 or 2 for a quicker run.
-BATCH_SIZE = 128
+BATCH_SIZE = 128  # Number of images used for each parameter update.
 
 random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
-torch.use_deterministic_algorithms(True)
+torch.use_deterministic_algorithms(True)  # Prefer repeatable operations when available.
 DEVICE = torch.device(
     "cuda" if torch.cuda.is_available()
     else "mps" if torch.backends.mps.is_available()
@@ -277,8 +277,8 @@ model = keras.Sequential(
     name="dense_mnist",
 )
 model.compile(
-    optimizer=keras.optimizers.Adam(),
-    loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+    optimizer=keras.optimizers.Adam(),  # Adam updates the model weights.
+    loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),  # Classification error.
     metrics=["accuracy"],
 )
 model.summary()
@@ -367,8 +367,8 @@ model = nn.Sequential(
     nn.Dropout(DROPOUT_RATE),
     nn.Linear(150, 10),
 ).to(DEVICE)
-loss_function = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters())
+loss_function = nn.CrossEntropyLoss()  # Classification error for the ten digits.
+optimizer = torch.optim.Adam(model.parameters())  # Adam updates the model weights.
 print(model)
 """
 
