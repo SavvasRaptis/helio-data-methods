@@ -62,6 +62,7 @@ def main() -> None:
             "MPLCONFIGDIR": str(Path(temporary) / "matplotlib"),
             "MPLBACKEND": "module://matplotlib_inline.backend_inline",
             "HELIO_TUNER_DIR": str(Path(temporary) / "tuning"),
+            "PYTORCH_ENABLE_MPS_FALLBACK": "1",
         }
         previous = {key: os.environ.get(key) for key in environment}
         os.environ.update(environment)
@@ -95,6 +96,16 @@ def main() -> None:
                         and cell.get("source", "").strip() == "%matplotlib inline"
                     ):
                         cell["outputs"] = []
+                    for output in cell.get("outputs", []):
+                        if output.get("output_type") != "stream":
+                            continue
+                        lines = output.get("text", "").splitlines(keepends=True)
+                        output["text"] = "".join(
+                            line
+                            for line in lines
+                            if "MPS backend and will fall back to run on the CPU"
+                            not in line
+                        )
                 nbformat.write(executed, path)
                 print(f"stored verified outputs: {path.relative_to(ROOT)}")
         finally:

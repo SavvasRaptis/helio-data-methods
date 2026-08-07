@@ -76,9 +76,8 @@ The official 60,000-example training collection is divided with a seeded,
 stratified split into 50,000 training and 10,000 validation samples. The
 official 10,000-example test set remains untouched until final evaluation.
 
-Set the environment variable `HELIO_FAST_RUN=1` before execution to use a
-small smoke-test subset and one epoch. Normal execution uses the full
-five-epoch teaching experiment.
+The example uses five epochs. To run it more quickly, set `EPOCHS` to 1 or 2
+in the data-loading cell.
 
 The notebook is self-contained in Google Colab. Select **Runtime → Run all**;
 the runtime will use its installed PyTorch stack. The Keras alternative uses
@@ -114,9 +113,8 @@ print("runtime dependency check passed")
 
 
 COMMON_DATA_KERAS = """
-FAST_RUN = os.getenv("HELIO_FAST_RUN", "0") == "1"
 SEED = 42
-EPOCHS = 1 if FAST_RUN else 5
+EPOCHS = 5  # Reduce to 1 or 2 for a quicker run.
 BATCH_SIZE = 128
 
 keras.utils.set_random_seed(SEED)
@@ -135,12 +133,6 @@ split_signature = hashlib.sha256(
     validation_indices.astype("<i8").tobytes()
 ).hexdigest()[:16]
 
-if FAST_RUN:
-    train_indices = train_indices[:5_000]
-    validation_indices = validation_indices[:1_000]
-    x_test = x_test[:2_000]
-    y_test = y_test[:2_000]
-
 x_train = x_development[train_indices].astype("float32") / 255.0
 y_train = y_development[train_indices]
 x_validation = x_development[validation_indices].astype("float32") / 255.0
@@ -156,9 +148,8 @@ print(
 """
 
 COMMON_DATA_TORCH = """
-FAST_RUN = os.getenv("HELIO_FAST_RUN", "0") == "1"
 SEED = 42
-EPOCHS = 1 if FAST_RUN else 5
+EPOCHS = 5  # Reduce to 1 or 2 for a quicker run.
 BATCH_SIZE = 128
 
 random.seed(SEED)
@@ -195,12 +186,6 @@ train_indices, validation_indices = train_test_split(
 split_signature = hashlib.sha256(
     validation_indices.astype("<i8").tobytes()
 ).hexdigest()[:16]
-
-if FAST_RUN:
-    train_indices = train_indices[:5_000]
-    validation_indices = validation_indices[:1_000]
-    x_test = x_test[:2_000]
-    y_test = y_test[:2_000]
 
 x_train = x_development[train_indices].astype("float32") / 255.0
 y_train = y_development[train_indices]

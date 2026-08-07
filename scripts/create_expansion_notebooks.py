@@ -287,11 +287,10 @@ def make_windows(frame, years, history_hours, horizon_hours):
     )
 
 
-FAST_RUN = os.getenv("HELIO_FAST_RUN", "0") == "1"
 SEED = 42
 HISTORY_HOURS = HISTORY_HOURS_SETTING
 HORIZON_HOURS = 3
-EPOCHS = 1 if FAST_RUN else 10
+EPOCHS = 10  # Reduce to 1 or 2 for a quicker run.
 BATCH_SIZE = 128
 
 random.seed(SEED)
@@ -306,12 +305,6 @@ x_validation_raw, y_validation, persistence_validation, time_validation = make_w
 x_test_raw, y_test, persistence_test, time_test = make_windows(
     frame, [2015], HISTORY_HOURS, HORIZON_HOURS
 )
-
-if FAST_RUN:
-    x_train_raw, y_train = x_train_raw[:6000], y_train[:6000]
-    x_validation_raw, y_validation = x_validation_raw[:2000], y_validation[:2000]
-    x_test_raw, y_test = x_test_raw[:2000], y_test[:2000]
-    persistence_test, time_test = persistence_test[:2000], time_test[:2000]
 
 scaler = StandardScaler().fit(x_train_raw)
 x_train = scaler.transform(x_train_raw).astype(np.float32)
@@ -383,7 +376,26 @@ assert np.isfinite(predictions).all()
 DST_DIAGNOSTICS = r"""
 display_count = min(1000, len(y_test))
 worst = np.argsort(np.abs(y_test - predictions))[-8:][::-1]
-fig, axes = plt.subplots(2, 1, figsize=(12, 7))
+
+# Locate the strongest Dst decrease around 7 January 2015, then show a
+# focused 20-hour interval around the observed minimum.
+event_search = (
+    (time_test >= np.datetime64("2015-01-05"))
+    & (time_test < np.datetime64("2015-01-10"))
+)
+event_candidates = np.flatnonzero(event_search)
+event_center_index = event_candidates[np.argmin(y_test[event_candidates])]
+event_center = time_test[event_center_index]
+event_window = (
+    (time_test >= event_center - np.timedelta64(10, "h"))
+    & (time_test <= event_center + np.timedelta64(10, "h"))
+)
+event_model_metrics = regression_metrics(y_test[event_window], predictions[event_window])
+event_persistence_metrics = regression_metrics(
+    y_test[event_window], persistence_test[event_window]
+)
+
+fig, axes = plt.subplots(3, 1, figsize=(12, 10.5))
 axes[0].plot(time_test[:display_count], y_test[:display_count], label="observed", linewidth=1)
 axes[0].plot(time_test[:display_count], predictions[:display_count], label="neural model")
 axes[0].plot(
@@ -397,8 +409,43 @@ axes[0].legend()
 axes[1].scatter(predictions, y_test - predictions, s=8, alpha=0.35)
 axes[1].axhline(0, color="black", linewidth=1)
 axes[1].set(xlabel="Predicted Dst [nT]", ylabel="Residual [nT]", title="Test residuals")
+axes[2].plot(time_test[event_window], y_test[event_window], label="observed", marker="o")
+axes[2].plot(
+    time_test[event_window], predictions[event_window], label="neural model", marker="o"
+)
+axes[2].plot(
+    time_test[event_window],
+    persistence_test[event_window],
+    label="persistence",
+    marker="o",
+    linestyle=":",
+)
+axes[2].set(
+    title=f"Dst minimum near {str(event_center)[:13]} (±10 hours)",
+    xlabel="Target time",
+    ylabel="Dst [nT]",
+)
+axes[2].legend()
+axes[2].grid(alpha=0.25)
+axes[2].text(
+    0.01,
+    0.03,
+    (
+        f"Neural: MAE={event_model_metrics['mae']:.1f}, "
+        f"RMSE={event_model_metrics['rmse']:.1f} nT\n"
+        f"Persistence: MAE={event_persistence_metrics['mae']:.1f}, "
+        f"RMSE={event_persistence_metrics['rmse']:.1f} nT"
+    ),
+    transform=axes[2].transAxes,
+    fontsize=9,
+    bbox={"facecolor": "white", "alpha": 0.85, "edgecolor": "0.8"},
+)
 plt.tight_layout()
 plt.show()
+
+print(f"Focused interval center: {event_center}")
+print("Focused neural-model metrics:", event_model_metrics)
+print("Focused persistence metrics:", event_persistence_metrics)
 
 print("Largest absolute test errors:")
 for index in worst:
@@ -427,9 +474,9 @@ This {role} implements the experiment in the
 inside fixed year partitions and evaluates a three-hour-ahead forecast against
 true forecast-origin persistence.
 
-Set `HELIO_FAST_RUN=1` for the reduced one-epoch smoke configuration. In Colab,
-select **Runtime → Run all**; the data cell downloads and verifies only the
-archived OMNI file when no local checkout is available.
+In Colab, select **Runtime → Run all**; the data cell downloads and verifies
+only the archived OMNI file when no local checkout is available. To run the
+example more quickly, set `EPOCHS` to 1 or 2 in the data-preparation cell.
 """
         ),
         md("## Imports and reproducibility"),
@@ -689,9 +736,6 @@ print(f"PyTorch {torch.__version__}")
 
 def image_data_code(framework: str, dataset: str, epochs: int, batch_size: int) -> str:
     validation_size = 10_000 if dataset == "mnist" else 5_000
-    train_fast = 5_000 if dataset == "mnist" else 2_000
-    validation_fast = 2_000 if dataset == "mnist" else 500
-    test_fast = 2_000 if dataset == "mnist" else 500
     shape_keras = (
         'x_train = x_train[..., np.newaxis]\n'
         'x_validation = x_validation[..., np.newaxis]\n'
@@ -766,9 +810,8 @@ DEVICE = torch.device(
         shape = shape_torch
     return dedent(
         f"""
-FAST_RUN = os.getenv("HELIO_FAST_RUN", "0") == "1"
 SEED = 42
-EPOCHS = 1 if FAST_RUN else {epochs}
+EPOCHS = {epochs}  # Reduce to 1 or 2 for a quicker run.
 BATCH_SIZE = {batch_size}
 {seed}
 {load}
@@ -782,12 +825,6 @@ train_indices, validation_indices = train_test_split(
 split_signature = hashlib.sha256(
     validation_indices.astype("<i8").tobytes()
 ).hexdigest()[:16]
-
-if FAST_RUN:
-    train_indices = train_indices[:{train_fast}]
-    validation_indices = validation_indices[:{validation_fast}]
-    x_test = x_test[:{test_fast}]
-    y_test = y_test[:{test_fast}]
 
 x_train = x_development[train_indices].astype("float32") / 255.0
 y_train = y_development[train_indices].astype(np.int64)
@@ -1147,8 +1184,9 @@ This {role} belongs to [{chapter}](index.md). Keras and PyTorch use the same
 seeded indices, normalization, architecture intent, training budget, metrics,
 and diagnostic figures.
 
-Set `HELIO_FAST_RUN=1` for a reduced one-epoch smoke run. In Colab select
-**Runtime → Run all**; the canonical dataset is downloaded by the framework.
+In Colab, select **Runtime → Run all**; the canonical dataset is downloaded by
+the framework. To run the example more quickly, set `EPOCHS` to 1 or 2 in the
+data-loading cell.
 """
         ),
         md("## Imports and reproducibility"),
@@ -1240,8 +1278,8 @@ This {role} provides the framework-neutral tree-model comparison from
 [Tree Models and Ensembles](index.md). It uses the same seed-42 split and
 classification evidence as the neural examples.
 
-Set `HELIO_FAST_RUN=1` for a reduced ten-round smoke run. In Colab, run all
-cells; the first import cell installs XGBoost only if it is missing.
+In Colab, run all cells; the first import cell installs XGBoost only if it is
+missing. Reduce `ROUNDS` below if you want a quicker run.
 """
         ),
         md("## Imports and shared split"),
@@ -1271,7 +1309,6 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import train_test_split
 
-FAST_RUN = os.getenv("HELIO_FAST_RUN", "0") == "1"
 SEED = 42
 raw_root = Path(
     os.getenv("HELIO_DATA_DIR", Path.home() / ".cache" / "helio-data-methods" / "torchvision")
@@ -1330,10 +1367,6 @@ train_indices, validation_indices = train_test_split(
 split_signature = hashlib.sha256(
     validation_indices.astype("<i8").tobytes()
 ).hexdigest()[:16]
-if FAST_RUN:
-    train_indices = train_indices[:5_000]
-    validation_indices = validation_indices[:1_000]
-    x_test, y_test = x_test[:2_000], y_test[:2_000]
 x_train = x_development[train_indices].reshape(len(train_indices), -1).astype("float32") / 255
 y_train = y_development[train_indices]
 x_validation = (
@@ -1362,13 +1395,13 @@ parameters = {{
     "seed": SEED,
     "nthread": 2,
 }}
-rounds = 10 if FAST_RUN else 100
+ROUNDS = 100  # Reduce to 10 or 25 for a quicker run.
 dtrain = xgb.DMatrix(x_train, label=y_train)
 dvalidation = xgb.DMatrix(x_validation, label=y_validation)
 model = xgb.train(
     parameters,
     dtrain,
-    num_boost_round=rounds,
+    num_boost_round=ROUNDS,
     evals=[(dtrain, "training"), (dvalidation, "validation")],
     early_stopping_rounds=10,
     verbose_eval=10,
@@ -1440,8 +1473,8 @@ This {role} freezes an ImageNet-pretrained VGG16 feature extractor and trains a
 CIFAR-10 classifier. The split, head intent, ten-epoch maximum, and evaluation
 are aligned across frameworks.
 
-Set `HELIO_FAST_RUN=1` for a reduced one-epoch run. A network connection is
-required the first time the pretrained weights are cached.
+A network connection is required the first time the pretrained weights are
+cached. To run the example more quickly, set `EPOCHS` to 1 or 2 in the data cell.
 """
         ),
         md("## Imports and shared CIFAR-10 split"),
@@ -1636,7 +1669,7 @@ This {role} treats tuning as a validation experiment. Both frameworks use the
 same seed-42 split, discrete search space, four-trial budget, ten-epoch maximum,
 and validation accuracy objective.
 
-Set `HELIO_FAST_RUN=1` for two one-epoch trials.
+To run the search more quickly, reduce `TRIALS` or `SEARCH_EPOCHS` below.
 """
         ),
         md("## Imports and shared split"),
@@ -1678,8 +1711,8 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
         code(
             IMAGE_DISTRIBUTION
             + r"""
-TRIALS = 2 if FAST_RUN else 4
-SEARCH_EPOCHS = 1 if FAST_RUN else 10
+TRIALS = 4  # Reduce to 2 for a quicker search.
+SEARCH_EPOCHS = 10  # Reduce to 1 or 2 for quicker trials.
 SEARCH_SPACE = {
     "filters_1": [16, 32],
     "filters_2": [32, 64],
@@ -1868,7 +1901,7 @@ def gan_cells(framework: str, artifact: str) -> list[nbformat.NotebookNode]:
 
 This {role} modernizes the archived DCGAN. A fixed 100-dimensional noise panel
 tracks the same generated samples across training. Full execution uses 50
-epochs and batch size 128; `HELIO_FAST_RUN=1` uses one reduced epoch.
+epochs and batch size 128. Reduce `EPOCHS` to 1 or 2 for a quicker run.
 
 Losses and selected images are diagnostics, not proof that the generator
 learned the complete data distribution.
@@ -1881,9 +1914,8 @@ learned the complete data distribution.
             code(
                 IMAGE_KERAS_IMPORTS
                 + f"""
-FAST_RUN = os.getenv("HELIO_FAST_RUN", "0") == "1"
 SEED = 42
-EPOCHS = 1 if FAST_RUN else 50
+EPOCHS = 50  # Reduce to 1 or 2 for a quicker run.
 BATCH_SIZE = 128
 LATENT_DIM = 100
 LABEL_SMOOTHING = {smoothing}
@@ -1891,8 +1923,6 @@ keras.utils.set_random_seed(SEED)
 (x_train, _), _ = keras.datasets.mnist.load_data()
 x_train = (x_train.astype("float32") - 127.5) / 127.5
 x_train = x_train[..., np.newaxis]
-if FAST_RUN:
-    x_train = x_train[:5_000]
 dataset = torch.utils.data.DataLoader(
     torch.utils.data.TensorDataset(torch.from_numpy(x_train)),
     batch_size=BATCH_SIZE,
@@ -2039,9 +2069,8 @@ generated = generator(fixed_noise, training=False).detach().cpu().numpy()
             code(
                 IMAGE_TORCH_IMPORTS
                 + f"""
-FAST_RUN = os.getenv("HELIO_FAST_RUN", "0") == "1"
 SEED = 42
-EPOCHS = 1 if FAST_RUN else 50
+EPOCHS = 50  # Reduce to 1 or 2 for a quicker run.
 BATCH_SIZE = 128
 LATENT_DIM = 100
 LABEL_SMOOTHING = {smoothing}
@@ -2058,8 +2087,6 @@ data_root = Path(os.getenv("HELIO_DATA_DIR", Path.home() / ".cache" / "helio-dat
 mnist = datasets.MNIST(data_root, train=True, download=True)
 x_train = (mnist.data.numpy().astype("float32") - 127.5) / 127.5
 x_train = x_train[:, np.newaxis, ...]
-if FAST_RUN:
-    x_train = x_train[:5_000]
 loader = DataLoader(
     TensorDataset(torch.from_numpy(x_train)),
     batch_size=BATCH_SIZE,

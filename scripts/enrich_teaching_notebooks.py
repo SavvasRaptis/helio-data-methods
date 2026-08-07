@@ -190,7 +190,7 @@ models below use the same training and validation samples and the same
             ),
             code(
                 """
-EXAMPLE_ROUNDS = 10 if FAST_RUN else 50
+EXAMPLE_ROUNDS = 50  # Reduce to 10 or 25 for a quicker comparison.
 EXAMPLE_DEPTHS = [3, 6]
 print(f"depths: {EXAMPLE_DEPTHS}; round ceiling={EXAMPLE_ROUNDS}")
 """,
@@ -344,12 +344,12 @@ the model selected from validation accuracy is evaluated on the test set.
         ),
         *prefix[1:],
         md("## Simple source model — five epochs"),
-        code("EPOCHS = 1 if FAST_RUN else 5"),
+        code("EPOCHS = 5  # Reduce to 1 or 2 for a quicker run."),
         simple_model,
         clone(training),
         code(capture_simple),
         md("## Advanced source model — 25 epochs"),
-        code("EPOCHS = 1 if FAST_RUN else 25"),
+        code("EPOCHS = 25  # Reduce to 1 or 2 for a quicker run."),
         advanced_model,
         clone(training),
         code(capture_advanced),

@@ -52,6 +52,87 @@ def published_notebooks(module_filter: str | None) -> list[Path]:
     return paths
 
 
+def reduce_notebook_for_test(
+    notebook: nbformat.NotebookNode, path: Path
+) -> None:
+    """Reduce a temporary copy without exposing test controls to readers."""
+
+    is_general_ml = "general-ml" in path.parts
+    is_dst = "dst-forecasting" in path.parts
+    if not is_general_ml and not is_dst:
+        return
+
+    replacements = {
+        "EPOCHS = 5  # Reduce to 1 or 2 for a quicker run.": "EPOCHS = 1",
+        "EPOCHS = 10  # Reduce to 1 or 2 for a quicker run.": "EPOCHS = 1",
+        "EPOCHS = 25  # Reduce to 1 or 2 for a quicker run.": "EPOCHS = 1",
+        "EPOCHS = 50  # Reduce to 1 or 2 for a quicker run.": "EPOCHS = 1",
+        "TRIALS = 4  # Reduce to 2 for a quicker search.": "TRIALS = 2",
+        "SEARCH_EPOCHS = 10  # Reduce to 1 or 2 for quicker trials.": (
+            "SEARCH_EPOCHS = 1"
+        ),
+        "ROUNDS = 100  # Reduce to 10 or 25 for a quicker run.": "ROUNDS = 10",
+        "EXAMPLE_ROUNDS = 50  # Reduce to 10 or 25 for a quicker comparison.": (
+            "EXAMPLE_ROUNDS = 10"
+        ),
+    }
+    cifar = any(
+        part in {"cifar10-cnn-progression", "transfer-learning"}
+        for part in path.parts
+    )
+    training_samples, validation_samples, test_samples = (
+        (2_000, 500, 500) if cifar else (5_000, 1_000, 2_000)
+    )
+    subset = (
+        f"train_indices = train_indices[:{training_samples}]\n"
+        f"validation_indices = validation_indices[:{validation_samples}]\n"
+        f"x_test = x_test[:{test_samples}]\n"
+        f"y_test = y_test[:{test_samples}]\n\n"
+    )
+    for cell in notebook.cells:
+        if cell.cell_type != "code":
+            continue
+        source = cell.source
+        for old, new in replacements.items():
+            source = source.replace(old, new)
+        if is_general_ml and (
+            "train_test_split(" in source
+            and "x_train = x_development[train_indices]" in source
+        ):
+            source = source.replace(
+                "x_train = x_development[train_indices]",
+                subset + "x_train = x_development[train_indices]",
+                1,
+            )
+        if is_general_ml and "generative-models" in path.parts:
+            if "dataset = torch.utils.data.DataLoader(" in source:
+                source = source.replace(
+                    "dataset = torch.utils.data.DataLoader(",
+                    "x_train = x_train[:5_000]\n"
+                    "dataset = torch.utils.data.DataLoader(",
+                    1,
+                )
+            if "loader = DataLoader(" in source:
+                source = source.replace(
+                    "loader = DataLoader(",
+                    "x_train = x_train[:5_000]\nloader = DataLoader(",
+                    1,
+                )
+        if is_dst and "scaler = StandardScaler().fit(x_train_raw)" in source:
+            source = source.replace(
+                "scaler = StandardScaler().fit(x_train_raw)",
+                "x_train_raw, y_train = x_train_raw[:6000], y_train[:6000]\n"
+                "x_validation_raw, y_validation = "
+                "x_validation_raw[:2000], y_validation[:2000]\n"
+                "x_test_raw, y_test = x_test_raw[:2000], y_test[:2000]\n"
+                "persistence_test = persistence_test[:2000]\n"
+                "time_test = time_test[:2000]\n\n"
+                "scaler = StandardScaler().fit(x_train_raw)",
+                1,
+            )
+        cell.source = source
+
+
 def output_text(notebook: nbformat.NotebookNode) -> str:
     pieces: list[str] = []
     for cell in notebook.cells:
@@ -166,6 +247,7 @@ def main() -> None:
             "KERAS_HOME": str(cache_root / "keras"),
             "MPLCONFIGDIR": str(temporary_path / "matplotlib"),
             "MPLBACKEND": "module://matplotlib_inline.backend_inline",
+            "PYTORCH_ENABLE_MPS_FALLBACK": "1",
         }
         previous = {key: os.environ.get(key) for key in environment}
         os.environ.update(environment)
@@ -173,6 +255,7 @@ def main() -> None:
             for path in notebooks:
                 print(f"running {path.relative_to(ROOT)}", flush=True)
                 notebook = nbformat.read(path, as_version=4)
+                reduce_notebook_for_test(notebook, path)
                 metadata = notebook.metadata["helio_data_methods"]
                 client = NotebookClient(
                     notebook,
