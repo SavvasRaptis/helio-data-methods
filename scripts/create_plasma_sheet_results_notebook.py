@@ -50,9 +50,8 @@ cells = [
         uses the time history measured by monitors at L1 to predict near-Earth
         solar-wind conditions together with their uncertainties. PRIME-SH
         extends this data-driven probabilistic approach to the magnetosheath.
-        In the manuscript used here, PRIME-PS applies the broader modeling
-        family to plasma-sheet density and ion temperature using
-        multi-spacecraft observations.
+        PRIME-PS applies the broader modeling family to plasma-sheet density and
+        ion temperature using multi-spacecraft observations.
 
         The [PRIME GitHub repository](https://github.com/connor-obrien888/prime)
         provides code for working with the solar-wind, magnetosheath, and
@@ -94,23 +93,6 @@ cells = [
         "hide-input",
     ),
     code("%matplotlib inline", "provided", "hide-input"),
-    md(
-        r"""
-        ## Saved evidence and provenance
-
-        The compact dataset contains only the evidence used on this page:
-
-        - observed and predicted ion temperatures from the strict chronological
-          final-20% test split;
-        - the PRIME-PS and TM03 density grids for
-          (n_{SW}=20\,\mathrm{cm}^{-3}) and (B_{z,SW}=+5\,\mathrm{nT});
-        - a manifest recording source-file checksums and the grid transformation.
-
-        The original training data and model fitting are intentionally outside this
-        demonstration. The saved outputs are evaluated, not regenerated.
-
-        """
-    ),
     code(
         r"""
         import hashlib
@@ -203,9 +185,6 @@ cells = [
         if manifest["bundle"]["sha256"] != bundle_sha256:
             raise ValueError("The dataset manifest and result-bundle checksums disagree")
         results = np.load(bundle_path, allow_pickle=False)
-        print(f"verified dataset: {DATASET_ID}")
-        print(f"bundle SHA-256: {bundle_sha256}")
-        print(f"manuscript status: {manifest['manuscript']['status']}")
         """,
         "provided",
         "hide-input",
@@ -217,10 +196,6 @@ cells = [
         Both models are evaluated on the same timestamps. TM03 has missing output
         for some chronological test rows, so a common finite mask leaves 46,595
         samples. This avoids giving either model a different evaluation population.
-
-        The axes focus on 0-12 keV to follow the manuscript figure. Metrics are
-        computed from **all** common samples, including values outside those visible
-        limits.
         """
     ),
     code(
@@ -313,7 +288,7 @@ cells = [
         ### What changed between the models?
 
         On these common chronological samples, PRIME-PS has lower MAE and RMSE
-        and higher (R^2) and correlation than TM03. Both panels also show a
+        and higher $R^2$ and correlation than TM03. Both panels also show a
         compression of the hottest observed temperatures toward the middle of the
         predicted range. These summary statistics describe this saved test set;
         they do not establish performance for every storm, spacecraft, or plasma
@@ -326,10 +301,10 @@ cells = [
 
         The second comparison is not another test-set scatter plot. It evaluates
         both saved model outputs on the same synthetic equatorial grid with
-        (n_{SW}=20\,\mathrm{cm}^{-3}) and (B_{z,SW}=+5\,\mathrm{nT}).
+        $n_{SW}=20\,\mathrm{cm}^{-3}$ and $B_{z,SW}=+5\,\mathrm{nT}$.
 
         The PRIME-PS field was cropped to the TM03 domain, averaged from a 0.1 to
-        0.5 (R_E) grid, and lightly smoothed with a one-cell Gaussian filter, as
+        0.5 $R_E$ grid, and lightly smoothed with a one-cell Gaussian filter, as
         specified in the supplied figure workflow. A common validity mask and one
         shared color scale make the two panels directly comparable.
         """
@@ -397,11 +372,10 @@ cells = [
         r"""
         ### What changed in the spatial structure?
 
-        PRIME-PS produces a stronger cross-tail, (Y)-dependent density structure
+        PRIME-PS produces a stronger cross-tail, $Y$-dependent density structure
         under this driving condition, while TM03 remains comparatively symmetric.
-        The manuscript interprets the enhanced structure as dawn-favoring and
-        discusses its consistency with prior observations of plasma entry during
-        northward IMF.
+        The enhanced structure is dawn-favoring and is consistent with prior
+        observations of plasma entry during northward IMF.
 
         The maps are conditional model outputs, not independent observations across
         every grid cell. Their physical interpretation remains limited by the
@@ -430,20 +404,18 @@ cells = [
            high-temperature tail changes the visual impression. Then ask which
            metrics would better expose performance for extremes—for example,
            tail-conditioned MAE/RMSE above a threshold chosen in advance, tail bias,
-           or precision and recall for exceeding that threshold. For space weather,
-           should a model primarily capture average plasma-sheet conditions, or the
-           rarer intervals when ion temperatures reach the tens-of-keV regime and
-           above? Do not silently restrict the existing headline metrics to only the
-           visible points; define any extreme-event metric and threshold explicitly.
+           or precision and recall for exceeding that threshold.
         2. Rebuild the compact dataset with `--gaussian-sigma 0` after extending the
            preparation script, then compare raw block averages with the lightly
            smoothed map.
         3. In the density-map cell, change `DENSITY_CASE_KEY` from
-           `"high_density_northward"` ($n_{SW}=20$ cm$^{-3}$, $B_z=+5$ nT) to
-           `"high_density_southward"` ($n_{SW}=20$ cm$^{-3}$, $B_z=-5$ nT) or
-           `"low_density_northward"` ($n_{SW}=3$ cm$^{-3}$, $B_z=+5$ nT). The
-           fourth stored option is `"low_density_southward"` ($n_{SW}=3$
-           cm$^{-3}$, $B_z=-5$ nT). Keep the same mask, grid, and color limits so
+           `"high_density_northward"` ($n_{SW}=20\,\mathrm{cm}^{-3}$,
+           $B_z=+5\,\mathrm{nT}$) to `"high_density_southward"`
+           ($n_{SW}=20\,\mathrm{cm}^{-3}$, $B_z=-5\,\mathrm{nT}$) or
+           `"low_density_northward"` ($n_{SW}=3\,\mathrm{cm}^{-3}$,
+           $B_z=+5\,\mathrm{nT}$). The fourth stored option is
+           `"low_density_southward"` ($n_{SW}=3\,\mathrm{cm}^{-3}$,
+           $B_z=-5\,\mathrm{nT}$). Keep the same mask, grid, and color limits so
            the visual comparison remains controlled.
         """,
         "try-it-yourself",
