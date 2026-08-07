@@ -1,0 +1,61 @@
+name: Validate book and notebooks
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  book:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+        with:
+          version: "0.11.15"
+          enable-cache: true
+      - run: uv sync --frozen --group notebooks
+      - run: uv run --group notebooks python scripts/check_book_structure.py
+      - run: uv run --group notebooks pytest
+      - run: uv run --group notebooks python scripts/check_public_notebooks.py
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HELIO_DATA_REF: ${{ github.sha }}
+      - run: uv run --group notebooks jupyter-book clean .
+      - run: uv run --group notebooks jupyter-book build . --all -W
+
+  notebook-smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - neural-networks
+          - convolutional-neural-networks
+          - cifar10-cnn-progression
+          - tree-models
+          - transfer-learning
+          - hyperparameter-tuning
+          - generative-models
+          - dst-forecasting
+          - sep-occurrence-forecasting
+          - coronal-loop-reconstruction
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+        with:
+          version: "0.11.15"
+          enable-cache: true
+      - run: uv sync --frozen --group notebooks
+      - run: uv run --group notebooks python scripts/smoke_test_notebooks.py --module "${{ matrix.module }}"

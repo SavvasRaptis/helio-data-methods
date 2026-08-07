@@ -1,0 +1,88 @@
+{
+  "dataset_id": "plasma-sheet-prime-tm03",
+  "description": "Saved PRIME-PS and TM03 results for a no-training book demonstration.",
+  "manuscript": {
+    "title": "Machine Learning Modeling of Earth's Plasma Sheet using Multi-Spacecraft Observations",
+    "status": "under review"
+  },
+  "sources": {
+    "prime_csv": {
+      "filename": "geotail_100s_20percenttest_strictdata_windinput_200window_20250529_jd_data.csv",
+      "sha256": "1e3b98c36312fd07f0c8674966a111392a25e18a0e6752b1e9b75cbd440aff3f"
+    },
+    "tm03_csv": {
+      "filename": "tm03_20percenttest_strictdata.csv",
+      "sha256": "8348f6d1bbd268742e3a526dd38a8759f82d5a1767dea6594b5084924a902948"
+    },
+    "tm03_grid": {
+      "filename": "tm03_n_synthetic_2d.npy",
+      "sha256": "e2479cbd735e78d1c023380f2e7b6c4b6e3692fe048c4cf9388acc248b0ecb61"
+    },
+    "prime_grid": {
+      "filename": "psstrict_version6_2D_nivaried.npy",
+      "sha256": "58ff6819518333bc05f1dc0094d0d5d0de96c9ff603ce7daa929e127416c7700"
+    }
+  },
+  "derivation": {
+    "temperature_split": "chronological final 20 percent; strict data",
+    "temperature_common_samples": 46595,
+    "temperature_metrics": {
+      "prime_ps": {
+        "mae_kev": 1.2199367605555969,
+        "rmse_kev": 1.6149556863232586,
+        "r2": 0.38796029877417915,
+        "pearson_r": 0.7035105836833908
+      },
+      "tm03": {
+        "mae_kev": 1.3574474341531055,
+        "rmse_kev": 1.7625764732492557,
+        "r2": 0.27095503944365684,
+        "pearson_r": 0.5555405642115565
+      }
+    },
+    "density_default_case": "high_density_northward",
+    "density_cases": {
+      "low_density_southward": {
+        "index": 0,
+        "n_sw_cm3": 3.0,
+        "bz_nt": -5.0
+      },
+      "low_density_northward": {
+        "index": 1,
+        "n_sw_cm3": 3.0,
+        "bz_nt": 5.0
+      },
+      "high_density_southward": {
+        "index": 2,
+        "n_sw_cm3": 20.0,
+        "bz_nt": -5.0
+      },
+      "high_density_northward": {
+        "index": 3,
+        "n_sw_cm3": 20.0,
+        "bz_nt": 5.0
+      }
+    },
+    "prime_density_output_index": 0,
+    "prime_y_crop_indices": [
+      25,
+      275
+    ],
+    "block_average": [
+      5,
+      5
+    ],
+    "gaussian_sigma_cells": 1.0,
+    "common_mask": "TM03 < 0.1 or either model is non-finite",
+    "valid_density_cells": {
+      "low_density_southward": 2236,
+      "low_density_northward": 2236,
+      "high_density_southward": 2236,
+      "high_density_northward": 2236
+    }
+  },
+  "bundle": {
+    "filename": "plasma_sheet_prime_tm03_results.npz",
+    "sha256": "ed9392dcdc305f0275459efb52e3fd15e80fd0be9b76b7a1816b5177cf2ba604"
+  }
+}

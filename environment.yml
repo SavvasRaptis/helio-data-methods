@@ -1,0 +1,8 @@
+name: helio-data-methods
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11.5
+  - pip=25.3
+  - pip:
+      - uv==0.11.15

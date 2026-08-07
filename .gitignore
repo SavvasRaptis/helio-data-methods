@@ -1,0 +1,29 @@
+# Python
+.venv/
+.venv-notebooks/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.helio-cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Jupyter Book and Sphinx
+_build/
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+
+# Generated notebook artifacts
+figures/generated/
+checkpoints/
+training_checkpoints/
+my_dir/
+
+# Private maintainer notes
+CONTEXT.md
+CONTRIBUTING.md

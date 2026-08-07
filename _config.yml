@@ -1,0 +1,64 @@
+title: Statistical Modeling and Machine Learning in Heliophysics
+author: Savvas Raptis
+copyright: "2026"
+
+only_build_toc_files: true
+
+execute:
+  execute_notebooks: "off"
+
+exclude_patterns:
+  - _build
+  - _build/**
+  - .venv
+  - .venv/**
+  - .venv-notebooks
+  - .venv-notebooks/**
+  - .helio-cache
+  - .helio-cache/**
+  - .pytest_cache
+  - .pytest_cache/**
+  - "**/__pycache__"
+  - "**/.ipynb_checkpoints"
+
+parse:
+  myst_enable_extensions:
+    - colon_fence
+    - dollarmath
+    - linkify
+    - substitution
+
+repository:
+  url: https://github.com/SavvasRaptis/helio-data-methods
+  path_to_book: ""
+  branch: main
+
+launch_buttons:
+  colab_url: https://colab.research.google.com
+
+html:
+  use_repository_button: true
+  use_issues_button: false
+  use_edit_page_button: false
+  home_page_in_navbar: true
+  extra_footer: |
+    <div class="helio-book-footer" role="contentinfo" aria-label="Author contact">
+      <span class="helio-book-footer__name">Savvas Raptis</span>
+      <span class="helio-book-footer__separator" aria-hidden="true">&middot;</span>
+      <a href="mailto:Savvas.raptis@jhuapl.edu" title="Savvas.raptis@jhuapl.edu">APL email</a>
+      <span class="helio-book-footer__separator" aria-hidden="true">&middot;</span>
+      <a href="mailto:savvasraptis@pm.me" title="savvasraptis@pm.me">Personal email</a>
+      <span class="helio-book-footer__separator" aria-hidden="true">&middot;</span>
+      <a href="https://savvasraptis.github.io" target="_blank" rel="noopener noreferrer">Website <span aria-hidden="true">&#8599;</span></a>
+    </div>
+
+sphinx:
+  config:
+    html_static_path:
+      - _static
+    html_css_files:
+      - custom.css
+    html_js_files:
+      - github-star.js
+    suppress_warnings:
+      - myst.header

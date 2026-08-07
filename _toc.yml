@@ -1,0 +1,56 @@
+format: jb-book
+root: index
+
+chapters:
+  - file: general-ml/index
+    sections:
+      - file: general-ml/foundations/software-toolkit/index
+      - file: general-ml/foundations/neural-networks/index
+        sections:
+          - file: general-ml/foundations/neural-networks/pytorch/demo
+          - file: general-ml/foundations/neural-networks/keras/demo
+      - file: general-ml/foundations/convolutional-neural-networks/index
+        sections:
+          - file: general-ml/foundations/convolutional-neural-networks/pytorch/demo
+          - file: general-ml/foundations/convolutional-neural-networks/keras/demo
+      - file: general-ml/advanced/cifar10-cnn-progression/index
+        sections:
+          - file: general-ml/advanced/cifar10-cnn-progression/pytorch/demo
+          - file: general-ml/advanced/cifar10-cnn-progression/keras/demo
+      - file: general-ml/advanced/tree-models/index
+        sections:
+          - file: general-ml/advanced/tree-models/xgboost/demo
+      - file: general-ml/advanced/transfer-learning/index
+        sections:
+          - file: general-ml/advanced/transfer-learning/pytorch/demo
+          - file: general-ml/advanced/transfer-learning/keras/demo
+      - file: general-ml/advanced/hyperparameter-tuning/index
+        sections:
+          - file: general-ml/advanced/hyperparameter-tuning/pytorch/demo
+          - file: general-ml/advanced/hyperparameter-tuning/keras/demo
+      - file: general-ml/advanced/generative-models/index
+        sections:
+          - file: general-ml/advanced/generative-models/pytorch/demo
+          - file: general-ml/advanced/generative-models/keras/demo
+  - file: statistical-modeling/index
+  - file: heliophysics/index
+    sections:
+      - file: heliophysics/applications/dst-forecasting/index
+        sections:
+          - file: heliophysics/applications/dst-forecasting/pytorch/demo
+          - file: heliophysics/applications/dst-forecasting/keras/demo
+      - file: heliophysics/research-case-studies/plasma-sheet-modeling/index
+      - file: heliophysics/research-case-studies/sep-occurrence-forecasting/index
+        sections:
+          - file: heliophysics/research-case-studies/sep-occurrence-forecasting/pytorch/demo
+          - file: heliophysics/research-case-studies/sep-occurrence-forecasting/keras/demo
+          - file: heliophysics/research-case-studies/sep-occurrence-forecasting/xgboost
+            sections:
+              - file: heliophysics/research-case-studies/sep-occurrence-forecasting/xgboost/demo
+              - file: heliophysics/research-case-studies/sep-occurrence-forecasting/xgboost/validation
+              - file: heliophysics/research-case-studies/sep-occurrence-forecasting/xgboost/interpretability
+      - file: heliophysics/research-case-studies/coronal-loop-reconstruction/index
+        sections:
+          - file: heliophysics/research-case-studies/coronal-loop-reconstruction/pytorch/demo
+          - file: heliophysics/research-case-studies/coronal-loop-reconstruction/keras/demo
+  - file: resources/index
