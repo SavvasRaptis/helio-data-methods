@@ -66,6 +66,4 @@ errors, and checks every published notebook.
 
 ## Author
 
-Savvas Raptis — [website](https://savvasraptis.github.io) ·
-[APL email](mailto:Savvas.raptis@jhuapl.edu) ·
-[personal email](mailto:savvasraptis@pm.me)
+Savvas Raptis — [website](https://savvasraptis.github.io)
