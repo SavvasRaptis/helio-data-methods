@@ -16,7 +16,7 @@ baselines, and data provenance are treated as part of the modeling problem.
 ## Examples
 
 - [Dst Forecasting](applications/dst-forecasting/index.md) builds a
-  three-hour-ahead forecast from hourly OMNI data using time-ordered splits,
+  one-hour-ahead forecast from hourly OMNI data using time-ordered splits,
   gap-safe windows, training-only scaling, and a true persistence baseline.
 - [Plasma-Sheet Modeling](research-case-studies/plasma-sheet-modeling/index.ipynb)
   compares saved chronological temperature predictions and conditional

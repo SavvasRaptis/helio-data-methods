@@ -147,8 +147,8 @@ PYTORCH_SUGGESTIONS = {
         "save the fixed-noise grid at several points during training",
     ),
     "dst-forecasting": (
-        "compare three- and six-hour input histories",
-        "change the forecast horizon while keeping 2015 as the final test year",
+        "change `HORIZON_HOURS` from 1 to 3 and then 6 while keeping the three-hour input history and 2015 as the final test year",
+        "compare three- and six-hour input histories while keeping the one-hour forecast horizon fixed",
         "add one solar-wind variable and fit its scaling on training years only",
         "go one step further and rebuild the data-loading stage with NASA CDAWeb's official [`cdasws` Python API](https://cdaweb.gsfc.nasa.gov/WebServices/py/cdasws/), then reproduce the hourly OMNI variables and time range used here",
     ),

@@ -515,6 +515,20 @@ def validate_repository(root: Path) -> list[str]:
             r"(?i)training[- ]mean", all_cell_source + stored_output_text
         ):
             errors.append(f"{relative}: Dst must use persistence as its only baseline")
+        if module_id == "dst-forecasting" and artifact == "demo":
+            if not re.search(r"(?m)^HISTORY_HOURS\s*=\s*3\s*$", notebook_source):
+                errors.append(f"{relative}: Dst must use three hours of input history")
+            if not re.search(r"(?m)^HORIZON_HOURS\s*=\s*1\s*$", notebook_source):
+                errors.append(f"{relative}: Dst must use a one-hour forecast horizon")
+            if not (
+                "change `HORIZON_HOURS` from 1 to 3 and then 6" in all_cell_source
+                and "2015 as the final test year" in all_cell_source
+            ):
+                errors.append(
+                    f"{relative}: Dst exploration must mention three- and six-hour horizons"
+                )
+            if re.search(r"(?i)three-hour-ahead forecast", all_cell_source):
+                errors.append(f"{relative}: stale three-hour default wording remains")
         if re.search(
             r"(?:/Users/|[A-Za-z]:\\\\)", notebook_source + stored_output_text
         ):

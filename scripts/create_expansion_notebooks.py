@@ -289,12 +289,13 @@ def make_windows(frame, years, history_hours, horizon_hours):
 
 SEED = 42
 HISTORY_HOURS = HISTORY_HOURS_SETTING
-HORIZON_HOURS = 3
+HORIZON_HOURS = 1
 EPOCHS = 10  # Reduce to 1 or 2 for a quicker run.
 BATCH_SIZE = 128  # Number of hourly windows used for each parameter update.
 
 random.seed(SEED)
 np.random.seed(SEED)
+# Build each year partition independently so information never crosses a split.
 frame = read_omni(data_path)
 x_train_raw, y_train, persistence_train, time_train = make_windows(
     frame, range(2010, 2014), HISTORY_HOURS, HORIZON_HOURS
@@ -306,6 +307,7 @@ x_test_raw, y_test, persistence_test, time_test = make_windows(
     frame, [2015], HISTORY_HOURS, HORIZON_HOURS
 )
 
+# Estimate the scaling only from 2010–2013.
 scaler = StandardScaler().fit(x_train_raw)
 x_train = scaler.transform(x_train_raw).astype(np.float32)
 x_validation = scaler.transform(x_validation_raw).astype(np.float32)
@@ -471,7 +473,7 @@ def dst_cells(framework: str, artifact: str) -> list[nbformat.NotebookNode]:
 
 This {role} implements the experiment in the
 [Dst Forecasting](index.md) chapter. The notebook forms gap-safe windows
-inside fixed year partitions and evaluates a three-hour-ahead forecast against
+inside fixed year partitions and evaluates a one-hour-ahead forecast against
 true forecast-origin persistence.
 
 In Colab, select **Runtime → Run all**; the data cell downloads and verifies
@@ -479,21 +481,53 @@ only the archived OMNI file when no local checkout is available. To run the
 example more quickly, set `EPOCHS` to 1 or 2 in the data-preparation cell.
 """
         ),
-        md("## Imports and reproducibility"),
+        md(
+            """## Imports and reproducibility
+
+These imports provide the numerical, plotting, and evaluation tools used below.
+The fixed seed makes repeated runs easier to compare."""
+        ),
         code(DST_IMPORTS),
-        md("## Resolve the archived dataset"),
+        md(
+            """## Resolve the archived dataset
+
+The example uses the hourly OMNI2 archive for 2010–2015. The file is verified
+before it is read so the two implementations use exactly the same measurements."""
+        ),
         code(DST_DATA_BOOTSTRAP),
-        md("## Parse data, form windows, and fit training-only preprocessing"),
+        md(
+            """## Parse data, form windows, and fit training-only preprocessing
+
+Each sample contains the preceding three hourly values of the solar-wind and
+Dst inputs. The target is Dst one hour after the latest input, and windows are
+formed only across contiguous hourly measurements."""
+        ),
         code(DST_PREPARE.replace("HISTORY_HOURS_SETTING", str(history))),
-        md("## Inspect coverage and the training target"),
+        md(
+            """## Inspect coverage and the training target
+
+The time series shows the fixed year partitions, while the histogram summarizes
+the Dst values available for fitting the model."""
+        ),
         code(DST_DISTRIBUTION),
-        md("## Establish the persistence baseline"),
+        md(
+            """## Establish the persistence baseline
+
+For a one-hour forecast, persistence assumes that Dst remains at its value at
+the forecast origin. This is a demanding and physically meaningful reference
+for a short-horizon forecast."""
+        ),
         code(DST_METRICS),
     ]
     if framework == "keras":
         cells.extend(
             [
-                md("## Define the Keras model"),
+                md(
+                    """## Define the Keras model
+
+This small network maps the three-hour input state to one Dst prediction. The
+two hidden layers retain the structure of the original example."""
+                ),
                 code(
                     r"""
 os.environ["KERAS_BACKEND"] = "torch"
@@ -504,6 +538,7 @@ from keras import layers
 keras.utils.set_random_seed(SEED)
 torch.use_deterministic_algorithms(True)  # Prefer repeatable operations when available.
 assert keras.backend.backend() == "torch"
+# Define the neural network used for the Dst forecast.
 model = keras.Sequential(
     [
         keras.Input(shape=(x_train.shape[1],)),
@@ -520,7 +555,12 @@ model.compile(
 model.summary()
 """
                 ),
-                md("## Train with validation-based early stopping"),
+                md(
+                    """## Train with validation-based early stopping
+
+The model is fitted on 2010–2013 and monitored on 2014. Early stopping restores
+the state with the lowest validation loss before the 2015 evaluation."""
+                ),
                 code(
                     r"""
 callbacks = [
@@ -546,7 +586,12 @@ ax.grid(alpha=0.25)
 plt.show()
 """
                 ),
-                md("## Evaluate the untouched test year"),
+                md(
+                    """## Evaluate the untouched test year
+
+The final metrics use 2015 only after training and model selection are complete.
+Persistence skill is reported without assuming that the neural model must win."""
+                ),
                 code(
                     r"""
 predictions = model.predict(x_test, batch_size=BATCH_SIZE, verbose=0).reshape(-1)
@@ -558,7 +603,12 @@ predictions = model.predict(x_test, batch_size=BATCH_SIZE, verbose=0).reshape(-1
     else:
         cells.extend(
             [
-                md("## Define the PyTorch model"),
+                md(
+                    """## Define the PyTorch model
+
+This small network maps the three-hour input state to one Dst prediction. The
+two hidden layers retain the structure of the original example."""
+                ),
                 code(
                     r"""
 import torch
@@ -574,6 +624,7 @@ DEVICE = torch.device(
 )
 
 
+# Define the neural network used for the Dst forecast.
 class DstRegressor(nn.Module):
     def __init__(self, number_inputs):
         super().__init__()
@@ -595,7 +646,12 @@ loss_function = nn.MSELoss()  # Mean-squared error for the continuous Dst target
 print(model)
 """
                 ),
-                md("## Train and restore the best validation state"),
+                md(
+                    """## Train and restore the best validation state
+
+The explicit loop fits on 2010–2013 and checks 2014 after each epoch. We retain
+the state with the lowest validation loss for the final 2015 evaluation."""
+                ),
                 code(
                     r"""
 generator = torch.Generator().manual_seed(SEED)
@@ -649,7 +705,12 @@ ax.grid(alpha=0.25)
 plt.show()
 """
                 ),
-                md("## Evaluate the untouched test year"),
+                md(
+                    """## Evaluate the untouched test year
+
+The final metrics use 2015 only after training and model selection are complete.
+Persistence skill is reported without assuming that the neural model must win."""
+                ),
                 code(
                     r"""
 model.eval()
@@ -662,7 +723,13 @@ with torch.no_grad():
         )
     cells.extend(
         [
-            md("## Diagnose timing and residual errors"),
+            md(
+                """## Diagnose timing and residual errors
+
+The time traces show whether the model follows the evolution of Dst, while the
+residual plot exposes systematic errors. The final panel focuses on the January
+2015 minimum, where timing and amplitude are easier to inspect directly."""
+            ),
             code(DST_DIAGNOSTICS),
         ]
     )
@@ -2464,19 +2531,47 @@ In Colab, choose **Runtime → Run all**; the bootstrap downloads and verifies
 only four pickles.
 """
         ),
-        md("## Imports and deterministic configuration"),
+        md(
+            """## Imports and deterministic configuration
+
+These tools handle the tabular archive, preprocessing, classification metrics,
+and figures. The fixed seed keeps the sample-level comparison reproducible."""
+        ),
         code(SEP_IMPORTS),
-        md("## Resolve the immutable archive"),
+        md(
+            """## Resolve the immutable archive
+
+The four supplied files contain the archived training and test samples. Their
+checksums are verified so every implementation starts from the same data."""
+        ),
         code(dataset_bootstrap_code("sep-curated", SEP_FILES)),
-        md("## Preserve the supplied test set and split training samples"),
+        md(
+            """## Preserve the supplied test set and split training samples
+
+The supplied test set remains untouched. A stratified part of the supplied
+training samples is reserved for validation, and scaling is fitted only on the
+remaining training samples."""
+        ),
         code(SEP_PREPARE),
-        md("## Establish the majority-class baseline"),
+        md(
+            """## Establish the majority-class baseline
+
+SEP occurrences are rare in this archive, so overall accuracy alone can be
+misleading. The majority-class result provides context for the imbalance-aware
+metrics used below."""
+        ),
         code(SEP_METRICS),
     ]
     if framework == "keras":
         cells.extend(
             [
-                md("## Train the weighted Keras classifier"),
+                md(
+                    """## Train the weighted Keras classifier
+
+The network estimates the probability of SEP occurrence from the anonymous
+predictors. Class weights give the less frequent SEP samples greater influence
+during fitting."""
+                ),
                 code(
                     r"""
 os.environ["KERAS_BACKEND"] = "torch"
@@ -2488,6 +2583,7 @@ EPOCHS = 40  # Reduce to 5 or 10 for a quicker run.
 keras.utils.set_random_seed(SEED)
 torch.use_deterministic_algorithms(True)  # Prefer repeatable operations when available.
 assert keras.backend.backend() == "torch"
+# Define the neural network used for SEP occurrence classification.
 model = keras.Sequential(
     [
         keras.Input(shape=(x_train.shape[1],)),
@@ -2509,7 +2605,7 @@ history = model.fit(
     validation_data=(x_validation, y_validation),
     epochs=EPOCHS,
     batch_size=256,  # Number of samples used for each parameter update.
-    class_weight={0: class_weights[0], 1: class_weights[1]},
+    class_weight={0: class_weights[0], 1: class_weights[1]},  # Account for the rare SEP class.
     callbacks=[
         keras.callbacks.EarlyStopping(
             monitor="val_loss", patience=5, restore_best_weights=True
@@ -2520,7 +2616,12 @@ history = model.fit(
 probabilities = model.predict(x_test_scaled, verbose=0).reshape(-1)
 """
                 ),
-                md("## Inspect learning behavior"),
+                md(
+                    """## Inspect learning behavior
+
+The training and validation losses show whether the classifier continues to
+improve or begins to specialize too strongly to the training samples."""
+                ),
                 code(
                     r"""
 fig, ax = plt.subplots(figsize=(7, 3.5))
@@ -2536,7 +2637,13 @@ plt.show()
     else:
         cells.extend(
             [
-                md("## Train the weighted PyTorch classifier"),
+                md(
+                    """## Train the weighted PyTorch classifier
+
+The network estimates the probability of SEP occurrence from the anonymous
+predictors. The weighted loss gives the less frequent SEP samples greater
+influence during fitting."""
+                ),
                 code(
                     r"""
 import torch
@@ -2552,6 +2659,7 @@ DEVICE = torch.device(
     else "cpu"
 )
 
+# Define the neural network used for SEP occurrence classification.
 model = nn.Sequential(
     nn.Linear(x_train.shape[1], 40, bias=False),
     nn.BatchNorm1d(40),
@@ -2560,6 +2668,7 @@ model = nn.Sequential(
     nn.ReLU(),
     nn.Linear(30, 1),
 ).to(DEVICE)
+# Give the rare positive class additional weight in the loss.
 positive_weight = torch.tensor(
     [counts[0] / max(counts[1], 1)], dtype=torch.float32, device=DEVICE
 )
@@ -2610,7 +2719,12 @@ with torch.no_grad():
     )
 """
                 ),
-                md("## Inspect learning behavior"),
+                md(
+                    """## Inspect learning behavior
+
+The training and validation losses show whether the classifier continues to
+improve or begins to specialize too strongly to the training samples."""
+                ),
                 code(
                     r"""
 fig, ax = plt.subplots(figsize=(7, 3.5))
@@ -2625,7 +2739,13 @@ plt.show()
         )
     cells.extend(
         [
-            md("## Evaluate the untouched supplied test set"),
+            md(
+                """## Evaluate the untouched supplied test set
+
+The final comparison reports class-wise behavior, balanced accuracy, ROC-AUC,
+and PR-AUC on the supplied test samples. These are sample-level results because
+the archive has no event identifiers or timestamps."""
+            ),
             code(SEP_DIAGNOSTICS),
         ]
     )
@@ -2636,6 +2756,7 @@ SEP_XGB_TRAIN = r"""
 from xgboost import XGBClassifier
 
 ROUNDS = 300  # Reduce to 50 or 100 for a quicker run.
+# Define the boosted-tree model used for comparison.
 model = XGBClassifier(
     n_estimators=ROUNDS,
     max_depth=6,
@@ -2669,17 +2790,38 @@ Every result below is therefore sample-level teaching evidence, not an
 event-aware forecast claim or a physical attribution.
 """
         ),
-        md("## Imports and deterministic configuration"),
+        md(
+            """## Imports and deterministic configuration
+
+These tools handle the archived samples, preprocessing, imbalance-aware
+metrics, and the framework-neutral tree analysis."""
+        ),
         code(SEP_IMPORTS),
-        md("## Resolve the immutable archive"),
+        md(
+            """## Resolve the immutable archive
+
+The four supplied files contain the archived training and test samples. Their
+checksums are verified before any analysis is performed."""
+        ),
         code(dataset_bootstrap_code("sep-curated", SEP_FILES)),
-        md("## Preserve the supplied test set and split training samples"),
+        md(
+            """## Preserve the supplied test set and split training samples
+
+The supplied test set remains untouched. Validation samples are drawn only
+from the supplied training set, and preprocessing is fitted without using the
+test samples."""
+        ),
         code(SEP_PREPARE),
     ]
     if kind == "validation":
         cells.extend(
             [
-                md("## Repeated stratified validation within supplied training samples"),
+                md(
+                    """## Repeated stratified validation within supplied training samples
+
+Repeated stratified folds show how sensitive the tree model is to the particular
+sample-level partition. Each fold preserves the strong class imbalance."""
+                ),
                 code(
                     r"""
 from sklearn.model_selection import RepeatedStratifiedKFold
@@ -2688,6 +2830,7 @@ from xgboost import XGBClassifier
 N_SPLITS = 5  # Reduce to 2 for a quicker validation run.
 N_REPEATS = 3  # Reduce to 1 for a quicker validation run.
 ROUNDS = 200  # Reduce to 20 or 50 for a quicker validation run.
+# Repeat the sample-level validation with the same class balance in each fold.
 features = scaler.fit_transform(x_supplied_train).astype(np.float32)
 folds = RepeatedStratifiedKFold(
     n_splits=N_SPLITS,
@@ -2740,7 +2883,7 @@ print("HELIO_RESULT " + json.dumps({"folds": len(scores), **summary}, sort_keys=
                 ),
                 md(
                     """
-## Interpretation
+## How to read the validation result
 
 These folds estimate sensitivity to a sample-level partition. Without event
 identifiers, they cannot detect leakage between measurements from the same
@@ -2754,20 +2897,36 @@ physical event.
     if kind == "interpretability":
         cells.extend(
             [
-                md("## Establish the majority-class baseline"),
+                md(
+                    """## Establish the majority-class baseline
+
+Because non-SEP samples dominate the archive, the majority-class result is a
+useful reminder that accuracy by itself is not sufficient."""
+                ),
                 code(SEP_METRICS),
             ]
         )
     cells.extend(
         [
-            md("## Train the weighted boosted-tree model"),
+            md(
+                """## Train the weighted boosted-tree model
+
+XGBoost provides a nonlinear, non-neural comparison using the same split and
+class weighting as the other SEP demonstrations."""
+            ),
             code(SEP_XGB_TRAIN),
         ]
     )
     if kind == "interpretability":
         cells.extend(
             [
-                md("## Summarize anonymous feature influence with SHAP"),
+                md(
+                    """## Summarize anonymous feature influence with SHAP
+
+SHAP summarizes how strongly each anonymous column affects this fitted model.
+Without physical feature names, the plot describes model sensitivity rather
+than a physical attribution."""
+                ),
                 code(
                     r"""
 import warnings
@@ -2777,6 +2936,7 @@ import shap
 
 background_count = min(500, len(x_train))
 explain_count = min(300, len(x_test_scaled))
+# Compute model-attribution values for a representative sample of test rows.
 explainer = shap.TreeExplainer(model)
 shap_values = explainer.shap_values(x_test_scaled[:explain_count])
 if isinstance(shap_values, list):
@@ -2808,7 +2968,12 @@ print(
     else:
         cells.extend(
             [
-                md("## Evaluate the untouched supplied test set"),
+                md(
+                    """## Evaluate the untouched supplied test set
+
+The final metrics use the supplied test set only after the tree model is fixed.
+Balanced accuracy and PR-AUC are emphasized because SEP occurrences are rare."""
+                ),
                 code(SEP_METRICS),
                 code(SEP_DIAGNOSTICS),
             ]
@@ -2918,6 +3083,7 @@ x_train_raw, y_train_raw = assemble(train_indices)
 x_validation_raw, y_validation_raw = assemble(validation_indices)
 x_test_raw, y_test_raw = assemble(test_indices)
 
+# Estimate normalization from the training loops only.
 feature_mean = x_train_raw.mean(axis=(0, 1), keepdims=True)
 feature_std = x_train_raw.std(axis=(0, 1), keepdims=True)
 feature_std[feature_std < 1e-7] = 1
@@ -2930,6 +3096,7 @@ x_validation = ((x_validation_raw - feature_mean) / feature_std).astype(np.float
 x_test = ((x_test_raw - feature_mean) / feature_std).astype(np.float32)
 y_train = ((y_train_raw - target_mean) / target_std).astype(np.float32)
 y_validation = ((y_validation_raw - target_mean) / target_std).astype(np.float32)
+# Use the mean training height profile as a simple reference reconstruction.
 training_mean_prediction = np.repeat(target_mean, len(y_test_raw), axis=0)
 
 assert train_indices.max() < validation_indices.min() < test_indices.min()
@@ -3032,17 +3199,39 @@ In Colab, choose **Runtime → Run all**; the bootstrap verifies each archived
 array.
 """
         ),
-        md("## Imports and deterministic configuration"),
+        md(
+            """## Imports and deterministic configuration
+
+These tools load the archived loop geometry, evaluate reconstructed heights,
+and produce the diagnostic figures. Fixed seeds make the two implementations
+easier to compare."""
+        ),
         code(CORONAL_IMPORTS),
-        md("## Resolve the immutable arrays"),
+        md(
+            """## Resolve the immutable arrays
+
+The archive stores the projected coordinates, loop descriptors, and target
+heights separately. Each array is checksum-verified before reconstruction."""
+        ),
         code(dataset_bootstrap_code("coronal-loops", CORONAL_FILES)),
-        md("## Assemble features and apply the corrected split"),
+        md(
+            """## Assemble features and apply the corrected split
+
+Projected coordinates and three scalar descriptors are assembled for each loop.
+Normalization is estimated from loops 0–2999 only; loops 3000–3749 are used for
+validation and loops 3750–4999 remain the final test set."""
+        ),
         code(CORONAL_PREPARE),
     ]
     if framework == "keras":
         cells.extend(
             [
-                md("## Train the Keras convolutional regressor"),
+                md(
+                    """## Train the Keras convolutional regressor
+
+The one-dimensional convolutions follow the ordered points along each projected
+loop and return the full normalized height profile."""
+                ),
                 code(
                     r"""
 os.environ["KERAS_BACKEND"] = "torch"
@@ -3054,6 +3243,7 @@ EPOCHS = 10  # Reduce to 3 or 5 for a quicker run.
 keras.utils.set_random_seed(SEED)
 torch.use_deterministic_algorithms(True)
 assert keras.backend.backend() == "torch"
+# Define the neural network used to reconstruct the loop height profile.
 model = keras.Sequential(
     [
         keras.Input(shape=x_train.shape[1:]),
@@ -3091,7 +3281,12 @@ losses = history.history
     else:
         cells.extend(
             [
-                md("## Train the PyTorch convolutional regressor"),
+                md(
+                    """## Train the PyTorch convolutional regressor
+
+The one-dimensional convolutions follow the ordered points along each projected
+loop and return the full normalized height profile."""
+                ),
                 code(
                     r"""
 import torch
@@ -3108,6 +3303,7 @@ DEVICE = torch.device(
 )
 
 
+# Define the neural network used to reconstruct the loop height profile.
 class LoopRegressor(nn.Module):
     def __init__(self, output_points):
         super().__init__()
@@ -3179,7 +3375,12 @@ losses = {"loss": training_losses, "val_loss": validation_losses}
         )
     cells.extend(
         [
-            md("## Inspect learning curves"),
+            md(
+                """## Inspect learning curves
+
+Training and validation losses track reconstruction error in normalized height.
+Their separation indicates how well the fitted mapping transfers to held-out loops."""
+            ),
             code(
                 r"""
 fig, ax = plt.subplots(figsize=(7, 3.5))
@@ -3190,11 +3391,17 @@ ax.legend()
 plt.show()
 """
             ),
-            md("## Compare with the training-mean profile"),
+            md(
+                """## Compare with the training-mean profile
+
+The learned reconstruction is compared with the mean height profile from the
+training loops. Residual and three-dimensional views show where the geometry is
+captured and where it is missed."""
+            ),
             code(CORONAL_EVIDENCE),
             md(
                 """
-## Scientific boundary
+## How to read this result
 
 The reconstruction is evaluated only against the supplied arrays. Their
 archive does not contain enough provenance to make claims about broader solar

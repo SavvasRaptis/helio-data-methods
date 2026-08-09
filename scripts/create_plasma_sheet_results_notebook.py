@@ -219,6 +219,7 @@ cells = [
             }
 
 
+        # Evaluate both models on the same chronological sample population.
         metrics = {
             model: regression_metrics(observed, predicted)
             for model, predicted in predictions.items()
@@ -233,6 +234,14 @@ cells = [
             )
         """,
         "provided",
+    ),
+    md(
+        r"""
+        ### Compare the temperature predictions
+
+        Both panels use the same axes and count scale. This makes the spread,
+        systematic offsets, and behavior at high ion temperature easy to compare.
+        """
     ),
     code(
         r"""
@@ -311,7 +320,8 @@ cells = [
     ),
     code(
         r"""
-        # Change this key to explore another stored solar-wind condition.
+        # Select one common solar-wind condition for both plasma-sheet models.
+        # Change this key to explore another stored condition.
         DENSITY_CASE_KEY = "high_density_northward"  # 20 cm^-3 and +5 nT.
 
         x_edges = results["x_edges_re"]

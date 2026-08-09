@@ -9,7 +9,7 @@ implementation: pytorch-with-keras-alternative
 
 # Dst Forecasting
 
-This example uses hourly OMNI2 data from 2010–2015 to predict Dst three hours
+This example uses hourly OMNI2 data from 2010–2015 to predict Dst one hour
 ahead. Each input contains the preceding three hourly values of solar-wind
 speed, GSM \(B_z\), average magnetic-field magnitude, and Dst.
 
@@ -21,11 +21,11 @@ the training data. The neural model retains the source architecture:
 12 inputs → 50 ReLU → 30 ReLU → 1 linear output
 ```
 
-The single reference prediction is persistence. For a forecast horizon \(h\),
+The single reference prediction is persistence. For the one-hour forecast,
 it assumes that the most recently observed Dst will persist:
 
 $$
-\widehat{Dst}(t+h)=Dst(t).
+\widehat{Dst}(t+1)=Dst(t).
 $$
 
 The notebooks report MAE, RMSE, \(R^2\), persistence skill, time traces, and

@@ -112,6 +112,60 @@ def test_keras_workflows_offer_suggestions_without_duplicate_studies() -> None:
     }
 
 
+def test_dst_uses_one_hour_target_and_fixed_year_partitions() -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    sources = []
+    for framework in ("pytorch", "keras"):
+        notebook = nbformat.read(
+            repository_root
+            / f"heliophysics/applications/dst-forecasting/{framework}/demo.ipynb",
+            4,
+        )
+        source = "\n".join(cell.source for cell in notebook.cells)
+        sources.append(source)
+        assert "HISTORY_HOURS = 3" in source
+        assert "HORIZON_HOURS = 1" in source
+        assert "change `HORIZON_HOURS` from 1 to 3 and then 6" in source
+        assert "2015 as the final test year" in source
+        assert "three-hour-ahead forecast" not in source.lower()
+        for years in ("range(2010, 2014)", "[2014]", "[2015]"):
+            assert years in source
+
+    for phrase in (
+        "The target is Dst one hour after the latest input",
+        "persistence assumes that Dst remains at its value at",
+    ):
+        assert all(phrase in source for source in sources)
+
+
+def test_heliophysics_notebooks_include_sparse_scientific_guidance() -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    paths = [
+        path
+        for path in (repository_root / "heliophysics").rglob("*.ipynb")
+        if path.with_suffix("").relative_to(repository_root).as_posix()
+        in (repository_root / "_toc.yml").read_text(encoding="utf-8")
+    ]
+    assert len(paths) == 10
+    combined = {
+        path: "\n".join(cell.source for cell in nbformat.read(path, 4).cells)
+        for path in paths
+    }
+
+    neural = [path for path in paths if "/pytorch/" in path.as_posix() or "/keras/" in path.as_posix()]
+    for path in neural:
+        assert "# Define the neural network" in combined[path]
+
+    xgboost = next(path for path in paths if path.name == "demo.ipynb" and "/xgboost/" in path.as_posix())
+    validation = next(path for path in paths if path.name == "validation.ipynb")
+    interpretability = next(path for path in paths if path.name == "interpretability.ipynb")
+    plasma = next(path for path in paths if path.name == "index.ipynb")
+    assert "# Define the boosted-tree model" in combined[xgboost]
+    assert "# Repeat the sample-level validation" in combined[validation]
+    assert "# Compute model-attribution values" in combined[interpretability]
+    assert "# Select one common solar-wind condition" in combined[plasma]
+
+
 def test_reader_facing_notebook_inventory_is_23() -> None:
     repository_root = Path(__file__).resolve().parents[1]
     toc = (repository_root / "_toc.yml").read_text(encoding="utf-8")
