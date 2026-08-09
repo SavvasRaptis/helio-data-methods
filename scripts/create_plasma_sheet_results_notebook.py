@@ -299,9 +299,7 @@ cells = [
         On these common chronological samples, PRIME-PS has lower MAE and RMSE
         and higher $R^2$ and correlation than TM03. Both panels also show a
         compression of the hottest observed temperatures toward the middle of the
-        predicted range. These summary statistics describe this saved test set;
-        they do not establish performance for every storm, spacecraft, or plasma
-        regime.
+        predicted range.
         """
     ),
     md(
@@ -386,24 +384,6 @@ cells = [
         under this driving condition, while TM03 remains comparatively symmetric.
         The enhanced structure is dawn-favoring and is consistent with prior
         observations of plasma entry during northward IMF.
-
-        The maps are conditional model outputs, not independent observations across
-        every grid cell. Their physical interpretation remains limited by the
-        spacecraft coverage represented in the training archive, the synthetic
-        driver choice, the common mask, block averaging, and light smoothing.
-        """
-    ),
-    md(
-        r"""
-        ## What these comparisons establish
-
-        Together, the figures illustrate two complementary questions. The
-        chronological comparison measures pointwise agreement on common held-out
-        observations. The grid comparison asks whether a fitted model produces a
-        physically interpretable global structure under a specified input state.
-        Better pointwise metrics do not automatically validate every spatial
-        feature, and a plausible spatial pattern does not replace held-out
-        observational evaluation.
         """
     ),
     md(
