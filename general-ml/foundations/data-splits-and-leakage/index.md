@@ -2,16 +2,15 @@
 title: Data Splits and Leakage
 track: general
 level: foundation
-status: placeholder
+status: draft
 module_id: data-splits-and-leakage
 implementation: framework-neutral
 ---
 
 # Data Splits and Leakage
 
-A model is trained on known examples but is valuable only if it works on
-relevant examples it has not seen. Data splitting creates the evidence for
-that claim. A poor split can make a model appear successful even when it has
+A model is fitted to known examples but is useful only if it works on
+examples it has not seen. Splitting the data is how we test that claim. A poor split can make a model appear successful even when it has
 learned information that will not be available in use.
 
 ## Learning objectives
@@ -47,11 +46,13 @@ other partitions:
   intervals when the use case is forecasting forward in time.
 - **Spatially related data:** prevent neighboring or derived samples from
   appearing on both sides of the split.
-- **Rare classes:** stratification can stabilize class proportions, but it does
-  not override grouping or temporal constraints.
+- **Rare classes:** stratification keeps class proportions equal across
+  partitions, but it does not override grouping or temporal constraints.
 
-The correct split is the one that imitates the independence and information
-boundaries of the intended application.
+The right split imitates the independence and information boundaries of the
+intended application. The
+[coronal-loop case study](../../../heliophysics/research-case-studies/coronal-loop-reconstruction/index.md)
+shows the same model scored under three splits, with very different results.
 
 ## What leakage looks like
 
@@ -82,8 +83,8 @@ of the original training set:
 - 10,000 validation samples;
 - 10,000 official test samples.
 
-The seed is 42 in both framework implementations. The test set is evaluated
-only after the architecture and training procedure are fixed. The original
+The seed is 42 in both the PyTorch and the Keras notebooks. The test set is
+evaluated only after the architecture and training procedure are fixed. The original
 dataset composition is documented by
 [LeCun, Cortes, and Burges](https://yann.lecun.org/exdb/mnist/index.html).
 

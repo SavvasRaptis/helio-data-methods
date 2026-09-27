@@ -9,12 +9,15 @@ implementation: pytorch-with-keras-alternative
 
 # Transfer Learning
 
-Transfer learning reuses features learned for one task as the starting point
-for another. Here an ImageNet-pretrained VGG16 feature extractor is frozen and
-a new classifier is trained for CIFAR-10.
+Transfer learning reuses a network trained on one large dataset as a starting
+point for a different task. Here the convolutional layers of VGG16, trained
+on the 1.3 million images of ImageNet, are frozen and used as a feature
+extractor for CIFAR-10, and only a small classifier on top is trained.
 
-The notebooks use the same CIFAR-10 split and classifier structure while
-showing the native PyTorch workflow and the shorter Keras-on-Torch equivalent.
+The benefit is largest when labelled examples are few, which is the usual
+situation for rare events in heliophysics. The notebooks therefore train on
+1,000, 5,000, and 45,000 images and compare the transfer model with a small
+network trained from scratch on the same images.
 
-- [Complete PyTorch workflow](pytorch/demo.ipynb)
-- [Keras 3 alternative using the Torch backend](keras/demo.ipynb)
+- [PyTorch notebook](pytorch/demo.ipynb)
+- [Keras 3 notebook](keras/demo.ipynb)

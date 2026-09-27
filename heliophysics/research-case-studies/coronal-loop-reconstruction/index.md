@@ -9,19 +9,24 @@ implementation: pytorch-with-keras-alternative
 
 # Coronal-Loop Reconstruction
 
-This example is adapted from Chifu and Gafeira (2021),
-[*3D Solar Coronal Loop Reconstructions with Machine
-Learning*](https://iopscience.iop.org/article/10.3847/2041-8213/abed53).
-The saved arrays contain projected \(x\) and \(y\) loop coordinates and the
-corresponding \(z\)-coordinate profiles.
+EUV images show coronal loops in projection on the plane of the sky; their
+height above the surface is not measured directly. This example is adapted
+from Chifu and Gafeira (2021),
+[*3D Solar Coronal Loop Reconstructions with Machine Learning*](https://iopscience.iop.org/article/10.3847/2041-8213/abed53),
+and asks whether a one-dimensional convolutional network can recover the
+height profile of a loop from its projected shape and three scalar
+descriptors: projected length, footpoint separation, and apex angle.
 
-The converted example corrects the overlapping split in the legacy notebook:
-loops 0–2,999 are used for training, 3,000–3,749 for validation, and
-3,750–4,999 for final testing. Both notebooks use an aligned Conv1D model and
-show reconstruction metrics, residuals, and matched 3-D traces.
+The 5,000 saved loops are ordered by position, and neighbouring loops are
+nearly identical. The notebooks therefore score the same model under three
+splits: random loops, which leaks near-copies into the test set; groups of
+50 consecutive loops, the honest estimate for regions seen in training; and
+one contiguous spatial block, which tests extrapolation to a new region. The
+network beats the mean height profile clearly under the first two and fails
+under the third.
 
-- [Complete PyTorch workflow](pytorch/demo.ipynb)
-- [Keras 3 alternative using the Torch backend](keras/demo.ipynb)
+- [PyTorch notebook](pytorch/demo.ipynb)
+- [Keras 3 notebook](keras/demo.ipynb)
 
 Reference: I. Chifu and R. Gafeira (2021), *The Astrophysical Journal
 Letters*, 910, L10.

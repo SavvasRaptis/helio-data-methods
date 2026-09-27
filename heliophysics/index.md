@@ -9,24 +9,22 @@ implementation: none
 
 # Heliophysics
 
-These examples apply statistical and machine-learning methods to space-physics
-problems. Gaps, changing cadence, temporal dependence, rare events, physical
-baselines, and data provenance are treated as part of the modeling problem.
+These examples apply the methods of the earlier chapters to problems in
+space physics. In each, the difficulty lies less in the model than in the
+data: gaps and changing cadence, strong dependence between neighbouring
+samples, rare events, the need for a physical baseline, and archives whose
+provenance limits what can be concluded. Each notebook ends by stating what
+its results support.
 
-## Examples
-
-- [Dst Forecasting](applications/dst-forecasting/index.md) builds a
-  one-hour-ahead forecast from hourly OMNI data using time-ordered splits,
-  gap-safe windows, training-only scaling, and a true persistence baseline.
-- [Plasma-Sheet Modeling](research-case-studies/plasma-sheet-modeling/index.ipynb)
-  compares saved chronological temperature predictions and conditional
-  density maps without presenting model training.
-- [SEP Occurrence Forecasting](research-case-studies/sep-occurrence-forecasting/index.md)
-  examines class imbalance, sample-level validation, and interpretation while
-  making the archive's provenance limits explicit.
-- [Coronal-Loop Reconstruction](research-case-studies/coronal-loop-reconstruction/index.md)
-  uses corrected, non-overlapping partitions to compare profile
-  reconstruction models.
-
-Each example states what its evidence can support and where the available data
-or validation design limits the conclusion.
+- [Dst Forecasting](applications/dst-forecasting/index.md): a one-hour-ahead
+  forecast of the Dst index from hourly OMNI data, with year-based splits and
+  persistence as the baseline to beat.
+- [Plasma-Sheet Modeling](research-case-studies/plasma-sheet-modeling/index.ipynb):
+  saved predictions of a neural-network plasma-sheet model compared with the
+  empirical TM03 model, for ion temperature and for density maps.
+- [SEP Occurrence Forecasting](research-case-studies/sep-occurrence-forecasting/index.md):
+  a rare-event classification problem, the space-weather verification
+  scores, and how the decision threshold changes the forecast.
+- [Coronal-Loop Reconstruction](research-case-studies/coronal-loop-reconstruction/index.md):
+  recovering loop heights from projected shapes, and how the choice of split
+  changes the answer from excellent to useless.

@@ -9,52 +9,56 @@ implementation: none
 
 # Software Toolkit
 
-The examples in this book use a small collection of Python packages. You do
-not need to master them before starting. It is enough to know which job each
-package performs and to recognize the main data structures as they move
-through a modeling workflow. However, reading their documentation will be beneficial in the long run.
+The examples use a small set of Python packages. You do not need to know
+them before starting; it is enough to know what each one is for and to
+recognize the main data structures as they pass through a workflow. Their
+documentation, linked below, is worth reading as you go further.
 
 ## Jupyter notebooks and Google Colab
 
-A Jupyter notebook mixes explanatory text, executable Python, figures, and
-saved results. Run cells from top to bottom because later cells usually depend
-on variables created earlier. Google Colab runs the same kind of notebook in a
-temporary cloud environment, so downloaded data and installed extras may need
-to be recreated when the runtime restarts.
+A Jupyter notebook mixes text, executable Python, figures, and saved results.
+Run the cells from top to bottom, because later cells use variables created
+by earlier ones. Google Colab runs the same notebooks in a temporary cloud
+environment; downloaded data and installed packages disappear when the
+runtime restarts, and the notebooks fetch them again.
 
-## Package map
+## Packages used in the book
 
 | Package | Typical import | Role in this book |
 | --- | --- | --- |
-| [NumPy](https://numpy.org/doc/stable/) | `import numpy as np` | Numerical arrays and vectorized calculations |
-| [pandas](https://pandas.pydata.org/docs/) | `import pandas as pd` | Dataframes, timestamps, and tabular data cleaning |
-| [Matplotlib](https://matplotlib.org/stable/) | `import matplotlib.pyplot as plt` | Scientific Figures |
-| [scikit-learn](https://scikit-learn.org/stable/user_guide.html) | `from sklearn import ...` | Data splits, preprocessing, baselines, metrics, and diagnostic displays |
-| [PyTorch](https://pytorch.org/docs/stable/) | `import torch` | Canonical neural betwork models, and automatic differentiation |
-| [Keras 3](https://keras.io/) | `import keras` | A higher-level model API using the same PyTorch backend |
-| [XGBoost](https://xgboost.readthedocs.io/) | `import xgboost as xgb` | Gradient-boosted tree models for tabular and flattened inputs |
-| [Optuna](https://optuna.readthedocs.io/) / [KerasTuner](https://keras.io/keras_tuner/) | `import optuna` / `import keras_tuner` | Validation-based hyperparameter searches |
-| [SHAP](https://shap.readthedocs.io/) | `import shap` | Model-behavior diagnostics that require careful interpretation |
+| [NumPy](https://numpy.org/doc/stable/) | `import numpy as np` | Arrays and vectorized arithmetic |
+| [pandas](https://pandas.pydata.org/docs/) | `import pandas as pd` | Tables with named columns and timestamps |
+| [Matplotlib](https://matplotlib.org/stable/) | `import matplotlib.pyplot as plt` | Figures |
+| [scikit-learn](https://scikit-learn.org/stable/user_guide.html) | `from sklearn import ...` | Data splits, preprocessing, and metrics |
+| [PyTorch](https://pytorch.org/docs/stable/) | `import torch` | Neural networks and automatic differentiation |
+| [Keras 3](https://keras.io/) | `import keras` | A higher-level neural-network API, run here on PyTorch |
+| [XGBoost](https://xgboost.readthedocs.io/) | `import xgboost as xgb` | Gradient-boosted trees |
+| [Optuna](https://optuna.readthedocs.io/) / [KerasTuner](https://keras.io/keras_tuner/) | `import optuna` / `import keras_tuner` | Hyperparameter search |
+| [SHAP](https://shap.readthedocs.io/) | `import shap` | Attributing a model's predictions to its inputs |
 
 ## Other useful packages
 
-The following packages are also particularly useful to use in future exampels or experimentation.
+These are not used in the notebooks yet but are worth knowing.
 
-| Package | Typical import | When it may be useful |
+| Package | Typical import | Use |
 | --- | --- | --- |
-| [tslearn](https://tslearn.readthedocs.io/en/stable/) | `import tslearn` | Time-series distances, clustering, classification, and related learning tools |
-| [sktime](https://www.sktime.net/) | `import sktime` | A unified interface for forecasting, classification, transformation, and other time-series tasks |
-| [Seaborn](https://seaborn.pydata.org/) | `import seaborn as sns` | Higher-level statistical graphics built on Matplotlib |
-| [LightGBM](https://lightgbm.readthedocs.io/en/stable/) | `import lightgbm as lgb` | Efficient gradient-boosted tree models, especially for tabular data, similar to XGBoost |
-| [imbalanced-learn](https://imbalanced-learn.org/stable/) | `import imblearn` | Resampling methods, pipelines, and metrics for imbalanced classification problems |
-| [statsmodels](https://www.statsmodels.org/stable/index.html) | `import statsmodels.api as sm` | Statistical models, hypothesis tests, classical time-series methods, and detailed inference summaries |
+| [statsmodels](https://www.statsmodels.org/stable/index.html) | `import statsmodels.api as sm` | Regression with full inference, hypothesis tests, and classical time-series models |
+| [sktime](https://www.sktime.net/) | `import sktime` | One interface for time-series forecasting, classification, and transformation |
+| [tslearn](https://tslearn.readthedocs.io/en/stable/) | `import tslearn` | Time-series distances, clustering, and classification |
+| [imbalanced-learn](https://imbalanced-learn.org/stable/) | `import imblearn` | Resampling and metrics for rare-class problems |
+| [LightGBM](https://lightgbm.readthedocs.io/en/stable/) | `import lightgbm as lgb` | Gradient-boosted trees, often faster than XGBoost on large tables |
+| [Seaborn](https://seaborn.pydata.org/) | `import seaborn as sns` | Statistical graphics built on Matplotlib |
+| [SunPy](https://sunpy.org/) | `import sunpy` | Solar data search, download, and coordinate handling |
+| [cdasws](https://cdaweb.gsfc.nasa.gov/WebServices/py/cdasws/) | `from cdasws import CdasWs` | Programmatic access to NASA CDAWeb, including OMNI |
 
+## Three data representations
 
-## Three common data representations
-
-A `pandas.DataFrame` keeps column names and timestamps, which is helpful while
-auditing and cleaning scientific tables. NumPy arrays provide compact
-numerical matrices for preprocessing and many classical models.
+A pandas `DataFrame` keeps column names and timestamps, which helps while
+inspecting and cleaning scientific tables. A NumPy array is a plain numerical
+matrix, the input most preprocessing and classical models expect. A PyTorch
+tensor is the array a neural network consumes; it can live on a GPU and
+record the operations needed for gradients. Converting between them is one
+line each:
 
 ```python
 import pandas as pd
@@ -65,11 +69,13 @@ array = frame[["speed", "bz"]].to_numpy(dtype="float32")
 tensor = torch.from_numpy(array)
 ```
 
-## PyTorch is the canonical path
+## PyTorch and Keras
 
-PyTorch exposes the important steps explicitly: create tensors, define a
-model, calculate a loss, backpropagate, update parameters, and evaluate with
-gradients disabled. Keras 3 offers a shorter `compile()` and `fit()` workflow while still using PyTorch underneath. The backend must be selected before importing Keras:
+PyTorch makes each step of training explicit: build tensors, define a model,
+compute a loss, backpropagate, update the weights, and evaluate with
+gradients switched off. Keras 3 wraps the same steps in `compile()` and
+`fit()`, and in this book it runs on the PyTorch backend. The backend must be
+chosen before Keras is imported:
 
 ```python
 import os
@@ -80,6 +86,7 @@ import keras
 assert keras.backend.backend() == "torch"
 ```
 
-The Keras notebooks are alternative implementations, not a second modeling
-method. Their data boundaries, architecture intent, metrics, and scientific
-interpretation are almost identical to the PyTorch workflow.
+The Keras notebooks use the same data, split, architecture, and metrics as
+the PyTorch notebooks, so their results should agree closely. Small
+differences come from the frameworks' different default weight
+initializations and random-number streams.

@@ -5,6 +5,8 @@ chapters:
   - file: general-ml/index
     sections:
       - file: general-ml/foundations/software-toolkit/index
+      - file: general-ml/foundations/data-splits-and-leakage/index
+      - file: general-ml/foundations/model-evaluation/index
       - file: general-ml/foundations/neural-networks/index
         sections:
           - file: general-ml/foundations/neural-networks/pytorch/demo

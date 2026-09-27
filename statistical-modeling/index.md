@@ -9,10 +9,16 @@ implementation: none
 
 # Statistical Modeling
 
-This area will collect concise examples of classical regression, uncertainty
-and inference, time-series analysis, and related statistical methods.
+This part of the book will cover the classical methods that machine learning
+is measured against and often built on: linear and generalized linear
+regression with honest uncertainties, the bootstrap, probabilistic forecasts
+and their verification, and time-series models such as autoregressive and
+state-space models. Heliophysics examples will reuse the OMNI data from the
+[Dst chapter](../heliophysics/applications/dst-forecasting/index.md), for
+instance to fit an empirical ring-current model and to build prediction
+intervals for Dst.
 
-In the meantime, the [Software Toolkit](../general-ml/foundations/software-toolkit/index.md)
-introduces statsmodels, scikit-learn, and useful time-series packages, and the
-[Resources](../resources/index.md) page suggests places to explore the
-mathematical foundations.
+Until then, the [Software Toolkit](../general-ml/foundations/software-toolkit/index.md)
+lists statsmodels and the time-series packages, and the
+[Resources](../resources/index.md) page points to texts on the underlying
+statistics.

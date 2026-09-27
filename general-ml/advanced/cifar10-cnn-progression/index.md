@@ -9,13 +9,13 @@ implementation: pytorch-with-keras-alternative
 
 # CIFAR-10 CNN Progression
 
-CIFAR-10 contains small color images from ten classes and is more varied than
-MNIST. This example moves from a simple two-stage convolutional network to the
-deeper model represented in the source material, adding convolutional stages,
-normalization, dropout, and a larger classifier.
+CIFAR-10 contains 60,000 colour images of 32×32 pixels in ten classes, from
+airplanes to trucks. Objects vary in pose, scale, and background, so the task
+is much harder than MNIST. The notebooks train a small two-layer network and
+a deeper network with batch normalization and dropout on the same split,
+choose between them on validation accuracy, and evaluate only the chosen one
+on the test set. The deeper network's learning curves show overfitting
+setting in, and why restoring the best validation epoch matters.
 
-The same training, validation, and test examples are used throughout so the
-simple and advanced models can be viewed as one clear progression.
-
-- [Complete PyTorch workflow](pytorch/demo.ipynb)
-- [Keras 3 alternative using the Torch backend](keras/demo.ipynb)
+- [PyTorch notebook](pytorch/demo.ipynb)
+- [Keras 3 notebook](keras/demo.ipynb)

@@ -2,14 +2,14 @@
 title: Model Evaluation
 track: general
 level: foundation
-status: placeholder
+status: draft
 module_id: model-evaluation
 implementation: framework-neutral
 ---
 
 # Model Evaluation
 
-A metric compresses model behavior into evidence for a particular question.
+A metric compresses model behaviour into one number that answers one question.
 No metric is universally best: the useful choice depends on the target,
 baseline, class balance, and consequences of different errors.
 
@@ -27,8 +27,8 @@ By the end of this chapter, you should be able to:
 
 Evaluation is comparative. A classification baseline may always predict the
 most frequent training class. A regression baseline may predict the training
-mean, median, or—when time ordering makes it meaningful—the latest
-observation. Compute the baseline with the same inputs, test cases, and metric
+mean or median or, when time ordering makes it meaningful, the latest
+observation (persistence). Compute the baseline with the same inputs, test cases, and metric
 as the learned model.
 
 The baseline gives scale to the score. An accuracy of 90% is poor if a trivial
@@ -87,13 +87,18 @@ defines these averaging conventions and their implementations.
 
 Many classifiers first produce scores or probabilities and then select a
 class. Changing a decision threshold changes false positives and false
-negatives. A threshold must be chosen using training or validation data—not
+negatives. A threshold must be chosen using training or validation data, not
 the final test set.
 
-For a first multiclass MNIST model, accuracy, per-class precision/recall/F1,
-and the confusion matrix provide an interpretable starting set. Later
-rare-event applications will require stronger attention to precision–recall
-tradeoffs, calibration, event grouping, and uncertainty.
+For a first multiclass MNIST model, accuracy, per-class precision, recall, and
+F1, and the confusion matrix are a sufficient starting set. Rare events need
+more. Space-weather forecasts are usually verified with the probability of
+detection (recall), the false-alarm ratio, the true skill statistic
+(TSS, recall minus the false-positive rate), and the Heidke skill score
+(HSS, accuracy relative to chance), together with a reliability diagram for
+probabilistic forecasts. The
+[SEP case study](../../../heliophysics/research-case-studies/sep-occurrence-forecasting/index.md)
+shows how strongly these scores depend on the decision threshold.
 
 ## Regression metrics
 
@@ -106,8 +111,8 @@ For errors $e_i = \hat{y}_i-y_i$:
 - **root mean squared error (RMSE)** gives larger errors more influence because
   they are squared before averaging.
 
-Always inspect the error distribution or representative intervals in addition
-to a single number. Aggregate metrics can hide systematic failures in
+Inspect the error distribution or representative intervals as well as the
+summary numbers. Aggregate metrics can hide systematic failures in
 scientifically important regimes.
 
 ## A defensible evaluation report

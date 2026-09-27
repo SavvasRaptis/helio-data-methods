@@ -15,15 +15,26 @@ artifacts:
 
 # SEP Occurrence Forecasting
 
-This example is adapted from Aminalragia-Giamini et al. (2021),
+Solar energetic particle (SEP) events are bursts of high-energy protons
+accelerated by flares and coronal mass ejections; they endanger astronauts
+and spacecraft and can arrive within tens of minutes. This example is adapted
+from Aminalragia-Giamini et al. (2021),
 [*Solar Energetic Particle Event occurrence prediction using Solar Flare Soft
-X-ray measurements and Machine Learning*](https://www.swsc-journal.org/articles/swsc/full_html/2021/01/swsc210024/swsc210024.html).
+X-ray measurements and Machine Learning*](https://www.swsc-journal.org/articles/swsc/full_html/2021/01/swsc210024/swsc210024.html),
+which predicts SEP occurrence from soft X-ray flare measurements.
 
-The saved data contain 49 numerical features, binary labels, and an
-existing train/test assignment. The notebooks can therefore demonstrate sample-level classification, class imbalance, validation, and SHAP mechanics, but they cannot establish event-aware performance or physical feature attribution. For a more detailed discussion contact the authors.
+The saved data hold 49 standardized predictors per sample, a binary label,
+and a fixed train/test assignment. Events make up about 1.3% of the samples.
+The archive has no column names, event identifiers, or timestamps, which sets
+two limits: the predictors cannot be interpreted physically, and samples from
+the same event may fall in both the training and the test set, so all scores
+are probably optimistic. The notebooks show the methods for a rare-event
+problem (class weighting, verification scores, threshold choice, bootstrap
+uncertainty, and attribution) within those limits.
 
-- [Native PyTorch neural workflow](pytorch/demo.ipynb)
-- [Keras 3 neural alternative using the Torch backend](keras/demo.ipynb)
-- [XGBoost, sample-level validation, and SHAP](xgboost.md)
+- [PyTorch neural network](pytorch/demo.ipynb)
+- [Keras 3 neural network](keras/demo.ipynb)
+- [XGBoost, repeated validation, and SHAP](xgboost.md)
 
-Reference: S. Aminalragia-Giamini et al. (2021), *Journal of Space Weather and Space Climate*, 11, 59.
+Reference: S. Aminalragia-Giamini et al. (2021), *Journal of Space Weather and
+Space Climate*, 11, 59.

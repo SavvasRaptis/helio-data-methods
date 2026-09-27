@@ -97,3 +97,15 @@
     border: 0;
   }
 }
+
+/* Keep long page titles readable on narrow screens. */
+@media (max-width: 36rem) {
+  .bd-article h1 {
+    font-size: 1.9rem;
+    line-height: 1.2;
+  }
+
+  .bd-article h2 {
+    font-size: 1.45rem;
+  }
+}

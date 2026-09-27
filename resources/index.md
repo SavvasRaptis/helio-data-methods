@@ -1,9 +1,21 @@
 # Resources
 
-These are starting points rather than a required reading list. Choose a
-practical tutorial when you want to build something, or a mathematical text
-when you want to understand an assumption more deeply. Package documentation
+These are starting points, not a required reading list. Choose a practical
+tutorial when you want to build something and a mathematical text when you
+want to understand an assumption. Package documentation
 is listed separately in the [Software Toolkit](../general-ml/foundations/software-toolkit/index.md).
+
+## Heliophysics and space weather
+
+- [*Machine Learning, Statistics, and Data Mining for Heliophysics*](https://helioml.org/)
+  by Monica Bobra and James Mason is an open, notebook-based book of worked
+  heliophysics examples.
+- E. Camporeale (2019),
+  [*The Challenge of Machine Learning in Space Weather: Nowcasting and Forecasting*](https://doi.org/10.1029/2018SW002061),
+  *Space Weather*, 17, 1166, reviews applications and open problems.
+- [*Machine Learning Techniques for Space Weather*](https://doi.org/10.1016/C2016-0-01976-9),
+  edited by E. Camporeale, S. Wing, and J. Johnson (Elsevier, 2018), covers
+  methods and verification for space-weather forecasting.
 
 ## Practical starting points
 
