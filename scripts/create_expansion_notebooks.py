@@ -1684,8 +1684,8 @@ plt.show()
         md(
             """## What the results show
 
-Boosted trees classify flattened pixels well, but they make several times as
-many errors as the convolutional network on the same split. A tree that splits on pixel
+Boosted trees classify flattened pixels well, but they make two to three
+times as many errors as the convolutional network on the same split. A tree that splits on pixel
 412 learns nothing about pixel 413, so every stroke position has to be
 learned separately. On tabular data, where features have no spatial
 arrangement, the comparison usually goes the other way."""
