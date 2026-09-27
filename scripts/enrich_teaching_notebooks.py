@@ -1,14 +1,12 @@
 """Add concise exploration prompts to the published teaching notebooks.
 
-The source generators create complete workflows. This module keeps those
-workflows intact, adds a short ``Try it yourself`` section, and adds the one
-retained validation-only comparison for the XGBoost example.
+The generators create complete workflows. This module appends a short
+``Try it yourself`` section to each and adds the validation-only tree-depth
+experiment to the XGBoost example.
 """
 
 from __future__ import annotations
 
-import copy
-import uuid
 from pathlib import Path
 from textwrap import dedent
 from typing import Iterable
@@ -52,45 +50,11 @@ def code(source: str, *tags: str) -> nbformat.NotebookNode:
     return cell
 
 
-def clone(cell: nbformat.NotebookNode) -> nbformat.NotebookNode:
-    result = copy.deepcopy(cell)
-    result["id"] = uuid.uuid4().hex[:8]
-    if result.cell_type == "code":
-        result["outputs"] = []
-        result["execution_count"] = None
-    return result
-
-
 def heading_index(notebook: nbformat.NotebookNode, heading: str) -> int:
     for index, cell in enumerate(notebook.cells):
         if cell.cell_type == "markdown" and cell.source.strip().startswith(heading):
             return index
     raise ValueError(f"missing heading {heading!r}")
-
-
-def code_after(notebook: nbformat.NotebookNode, heading: str) -> nbformat.NotebookNode:
-    start = heading_index(notebook, heading)
-    for cell in notebook.cells[start + 1 :]:
-        if cell.cell_type == "code":
-            return clone(cell)
-        if cell.cell_type == "markdown" and cell.source.lstrip().startswith("## "):
-            break
-    raise ValueError(f"no code after {heading!r}")
-
-
-def cells_before(notebook: nbformat.NotebookNode, heading: str) -> list[nbformat.NotebookNode]:
-    return [clone(cell) for cell in notebook.cells[: heading_index(notebook, heading)]]
-
-
-def teaching_notebook(
-    source: nbformat.NotebookNode, cells: list[nbformat.NotebookNode]
-) -> nbformat.NotebookNode:
-    metadata = copy.deepcopy(dict(source.metadata))
-    teaching = metadata["helio_data_methods"]
-    teaching["artifact"] = "demo"
-    teaching["budget"] = "teaching"
-    teaching.pop("exercise_id", None)
-    return nbformat.v4.new_notebook(cells=cells, metadata=metadata)
 
 
 def strip_retired_sections(notebook: nbformat.NotebookNode) -> None:
@@ -104,6 +68,7 @@ def strip_retired_sections(notebook: nbformat.NotebookNode) -> None:
         "## Try it yourself",
         "## Try it yourself in Keras",
         "## Example thought",
+        "## Experiment: tree depth",
     )
     cutoffs = []
     for heading in retired:
@@ -117,40 +82,40 @@ def strip_retired_sections(notebook: nbformat.NotebookNode) -> None:
 
 PYTORCH_SUGGESTIONS = {
     "neural-networks": (
-        "change dropout from `0.5` to `0.25` and compare the validation curves",
-        "change one dense-layer width and inspect the parameter count",
-        "try a smaller Adam learning rate while keeping the split fixed",
+        "change dropout from `0.5` to `0.25` and compare the gap between training and validation accuracy",
+        "halve the width of both hidden layers and compare the parameter count with the change in accuracy",
+        "set the Adam learning rate to `1e-4` and to `1e-2` and compare the learning curves",
     ),
     "convolutional-neural-networks": (
-        "change the first convolution from 32 to 64 filters",
-        "compare 3×3 and 5×5 kernels",
-        "remove one pooling operation and inspect the tensor shapes",
+        "change the first convolution from 32 to 64 filters and compare accuracy with parameter count",
+        "compare 3×3 and 5×5 kernels; the dense layer's input size changes, so print the feature-map shape first",
+        "remove the dropout layers and watch the gap between training and validation loss",
     ),
     "cifar10-cnn-progression": (
-        "change the dropout in the advanced model",
-        "vary the third-stage filter count",
-        "compare how quickly the two models learn under a shorter budget",
+        "add random horizontal flips to the training images of the deeper network and compare the learning curves",
+        "change the dropout rates of the deeper network and see where overfitting starts",
+        "train the small network for 25 epochs to separate the effect of capacity from that of training time",
     ),
     "transfer-learning": (
-        "replace the 512→256 classifier with one 256-unit layer",
-        "change the classifier dropout while keeping VGG16 frozen",
-        "unfreeze only the final VGG16 block and use a smaller learning rate",
+        "add a 250-image subset to `SUBSET_SIZES` to see how far the frozen features carry",
+        "replace the head with a single linear layer, a logistic regression on the VGG16 features",
+        "unfreeze the last VGG16 block, train it with a learning rate of `1e-5`, and compare with the frozen model",
     ),
     "hyperparameter-tuning": (
-        "add dropout values to the search space",
-        "increase the number of trials and inspect whether the result is stable",
-        "repeat the search with a second sampler seed",
+        "rerun the search with a different sampler seed and see whether the same configuration wins",
+        "increase `TRIALS` to 12 and check how much the best validation accuracy improves",
+        "add dropout rates to the search space",
     ),
     "generative-models": (
-        "try discriminator label smoothing of `0.1`",
-        "vary the latent dimension while keeping the fixed noise samples",
-        "save the fixed-noise grid at several points during training",
+        "set `LABEL_SMOOTHING` to `0.1` and compare the samples and losses",
+        "halve the discriminator's learning rate and watch the balance of the two losses",
+        "reduce `LATENT_DIM` to 10 and look for less variety in the samples",
     ),
     "dst-forecasting": (
-        "change `HORIZON_HOURS` from 1 to 3 and then 6 while keeping the three-hour input history and 2015 as the final test year",
+        "change `HORIZON_HOURS` from 1 to 3 and then 6 while keeping the three-hour input history and 2015 as the final test year; persistence degrades quickly, so watch the skill score",
         "compare three- and six-hour input histories while keeping the one-hour forecast horizon fixed",
-        "add one solar-wind variable and fit its scaling on training years only",
-        "go one step further and rebuild the data-loading stage with NASA CDAWeb's official [`cdasws` Python API](https://cdaweb.gsfc.nasa.gov/WebServices/py/cdasws/), then reproduce the hourly OMNI variables and time range used here",
+        "replace $B_z$ with the rectified coupling term $V B_s$, where $B_s = -B_z$ for southward field and 0 otherwise, and fit its scaling on training years only",
+        "rebuild the data loading with NASA CDAWeb's [`cdasws` Python API](https://cdaweb.gsfc.nasa.gov/WebServices/py/cdasws/) and reproduce the hourly OMNI variables and time range used here",
     ),
 }
 
@@ -180,11 +145,11 @@ def add_xgboost_example_thought(notebook: nbformat.NotebookNode) -> None:
         [
             md(
                 """
-## Example thought
+## Experiment: tree depth
 
-How does maximum tree depth affect validation error and runtime? The two
-models below use the same training and validation samples and the same
-50-round ceiling. The final test set is not used in this comparison.
+How does maximum tree depth trade validation error against runtime? The two
+models below use the same training and validation images and the same
+50-round ceiling. The test set is not used.
 """,
                 "example-thought",
             ),
@@ -192,7 +157,7 @@ models below use the same training and validation samples and the same
                 """
 EXAMPLE_ROUNDS = 50  # Reduce to 10 or 25 for a quicker comparison.
 EXAMPLE_DEPTHS = [3, 6]
-print(f"depths: {EXAMPLE_DEPTHS}; round ceiling={EXAMPLE_ROUNDS}")
+print(f"depths: {EXAMPLE_DEPTHS}; round ceiling: {EXAMPLE_ROUNDS}")
 """,
                 "example-thought",
             ),
@@ -224,7 +189,6 @@ def run_depth_example(depth):
     }
 """,
                 "example-thought",
-                "provided",
                 "hide-input",
             ),
             code(
@@ -255,9 +219,9 @@ print("HELIO_EXPERIMENT " + json.dumps(experiment_evidence, sort_keys=True))
                 """
 ## Try it yourself
 
-- Try depths 2, 4, and 8 and compare validation error with runtime.
-- Hold depth fixed and vary the learning rate between `0.03` and `0.15`.
-- Change `subsample` from `0.8` to `0.6` or `1.0` and inspect stability.
+- Try depths 2, 4, and 8 and plot validation error against runtime.
+- Hold the depth fixed and vary `eta` between `0.03` and `0.15`.
+- Change `subsample` from `0.8` to `0.6` or `1.0` and rerun with a second seed to see how much the error moves.
 """,
                 "try-it-yourself",
             ),
@@ -265,127 +229,8 @@ print("HELIO_EXPERIMENT " + json.dumps(experiment_evidence, sort_keys=True))
     )
 
 
-PYTORCH_ADVANCED_CIFAR = """
-class ImageClassifier(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(3, 32, 3), nn.BatchNorm2d(32), nn.LeakyReLU(0.1),
-            nn.Conv2d(32, 64, 3, stride=2), nn.BatchNorm2d(64), nn.LeakyReLU(0.1),
-            nn.Conv2d(64, 128, 3, stride=2), nn.BatchNorm2d(128),
-            nn.LeakyReLU(0.1), nn.Dropout(0.2),
-        )
-        self.classifier = nn.Sequential(
-            nn.Flatten(), nn.Linear(128 * 6 * 6, 600), nn.BatchNorm1d(600),
-            nn.LeakyReLU(0.1), nn.Dropout(0.25), nn.Linear(600, 150),
-            nn.BatchNorm1d(150), nn.LeakyReLU(0.1), nn.Dropout(0.5),
-            nn.Linear(150, 10),
-        )
-
-    def forward(self, values):
-        return self.classifier(self.features(values))
-
-
-model = ImageClassifier()
-print(model)
-"""
-
-KERAS_ADVANCED_CIFAR = """
-model = keras.Sequential(
-    [
-        keras.Input(shape=(32, 32, 3)),
-        layers.Conv2D(32, 3), layers.BatchNormalization(),
-        layers.LeakyReLU(negative_slope=0.1),
-        layers.Conv2D(64, 3, strides=2), layers.BatchNormalization(),
-        layers.LeakyReLU(negative_slope=0.1),
-        layers.Conv2D(128, 3, strides=2), layers.BatchNormalization(),
-        layers.LeakyReLU(negative_slope=0.1), layers.Dropout(0.2),
-        layers.Flatten(), layers.Dense(600), layers.BatchNormalization(),
-        layers.LeakyReLU(negative_slope=0.1), layers.Dropout(0.25),
-        layers.Dense(150), layers.BatchNormalization(),
-        layers.LeakyReLU(negative_slope=0.1), layers.Dropout(0.5),
-        layers.Dense(10),
-    ],
-    name="cifar10_advanced",
-)
-"""
-
-
-def cifar_progression(notebook: nbformat.NotebookNode, framework: str) -> nbformat.NotebookNode:
-    prefix = cells_before(notebook, "## Define the model")
-    simple_model = code_after(notebook, "## Define the model")
-    training = code_after(notebook, "## Train with validation evidence")
-    evaluation = code_after(notebook, "## Evaluate once on the test set")
-    advanced_model = code(
-        PYTORCH_ADVANCED_CIFAR if framework == "pytorch" else KERAS_ADVANCED_CIFAR
-    )
-    if framework == "pytorch":
-        capture_simple = """
-simple_model = model
-simple_history = {key: list(value) for key, value in history.items()}
-simple_validation = float(max(history["val_accuracy"]))
-"""
-    else:
-        capture_simple = """
-simple_model = model
-simple_history = {key: list(value) for key, value in history.history.items()}
-simple_validation = float(max(history.history["val_accuracy"]))
-"""
-    capture_advanced = capture_simple.replace("simple", "advanced")
-    cells = [
-        md(
-            f"""
-# CIFAR-10 CNN Progression with {"Native PyTorch" if framework == "pytorch" else "Keras 3 — PyTorch Backend"}
-
-This workflow preserves both archived stages: the simple model receives five
-epochs and the advanced model receives its documented 25-epoch budget. Only
-the model selected from validation accuracy is evaluated on the test set.
-"""
-        ),
-        *prefix[1:],
-        md("## Simple source model — five epochs"),
-        code("EPOCHS = 5  # Reduce to 1 or 2 for a quicker run."),
-        simple_model,
-        clone(training),
-        code(capture_simple),
-        md("## Advanced source model — 25 epochs"),
-        code("EPOCHS = 25  # Reduce to 1 or 2 for a quicker run."),
-        advanced_model,
-        clone(training),
-        code(capture_advanced),
-        md("## Compare the source progression"),
-        code(
-            """
-if advanced_validation > simple_validation:
-    selected_name, model = "advanced source model", advanced_model
-else:
-    selected_name, model = "simple source model", simple_model
-fig, ax = plt.subplots(figsize=(7, 3.5))
-ax.plot(simple_history["val_accuracy"], label="simple (5 epochs)")
-ax.plot(advanced_history["val_accuracy"], label="advanced (25 epochs)")
-ax.set(title="Source-model validation progression", xlabel="Epoch", ylabel="Accuracy")
-ax.legend()
-ax.grid(alpha=0.25)
-plt.show()
-print(f"selected from validation evidence: {selected_name}")
-"""
-        ),
-        md("## Evaluate the selected source model once"),
-        evaluation,
-    ]
-    return teaching_notebook(notebook, cells)
-
-
 def enrich_all(module_ids: Iterable[str] | None = None) -> None:
     selected = set(module_ids or DEMOS)
-    if "cifar10-cnn-progression" in selected:
-        for framework, path in (
-            ("pytorch", DEMOS["cifar10-cnn-progression"]),
-            ("keras", KERAS_DEMOS["cifar10-cnn-progression"]),
-        ):
-            notebook = cifar_progression(nbformat.read(path, 4), framework)
-            nbformat.write(notebook, path)
-
     for module_id in selected:
         path = DEMOS[module_id]
         notebook = nbformat.read(path, 4)

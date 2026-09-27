@@ -16,12 +16,18 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ["local", "colab"]
 
 
-def md(text: str) -> nbformat.NotebookNode:
-    return nbformat.v4.new_markdown_cell(dedent(text).strip())
+def md(text: str, *tags: str) -> nbformat.NotebookNode:
+    cell = nbformat.v4.new_markdown_cell(dedent(text).strip())
+    if tags:
+        cell.metadata["tags"] = list(tags)
+    return cell
 
 
-def code(text: str) -> nbformat.NotebookNode:
-    return nbformat.v4.new_code_cell(dedent(text).strip())
+def code(text: str, *tags: str) -> nbformat.NotebookNode:
+    cell = nbformat.v4.new_code_cell(dedent(text).strip())
+    if tags:
+        cell.metadata["tags"] = list(tags)
+    return cell
 
 
 def make_notebook(
@@ -104,23 +110,21 @@ print("runtime dependency check passed")
         if cell.cell_type == "markdown":
             cell.source = cell.source.replace("](index.md)", "](../index.md)")
 
-    inserted_cells = [
-        cells[0],
-        md("## Runtime dependency check"),
-        diagnostics,
-        code("%matplotlib inline"),
-    ]
+    # The dependency check and backend magic matter when a notebook is run, not
+    # when it is read, so the book omits them.
+    diagnostics.metadata["tags"] = ["remove-cell"]
+    inserted_cells = [cells[0], diagnostics, code("%matplotlib inline", "remove-cell")]
     if framework == "keras":
         inserted_cells.append(
             md(
                 """
-## Keras-to-PyTorch crosswalk
+## Keras and PyTorch
 
-This optional implementation uses the same Torch runtime as the canonical
-native PyTorch path. Keras `compile()` selects the optimizer and loss,
-`fit()` owns the explicit batch and epoch loop, and callbacks provide
-high-level training control. Data, splits, budgets, evidence, and scientific
-conclusions remain aligned with the canonical PyTorch workflow.
+This notebook repeats the PyTorch version with the Keras 3 API, running on
+the same PyTorch backend. `compile()` sets the optimizer and loss, `fit()`
+runs the loop over batches and epochs, and callbacks such as early stopping
+replace hand-written control flow. The data split, model, and evaluation
+match the PyTorch notebook.
 """
             )
         )
@@ -291,7 +295,7 @@ SEED = 42
 HISTORY_HOURS = HISTORY_HOURS_SETTING
 HORIZON_HOURS = 1
 EPOCHS = 10  # Reduce to 1 or 2 for a quicker run.
-BATCH_SIZE = 128  # Number of hourly windows used for each parameter update.
+BATCH_SIZE = 128  # Hourly windows per parameter update.
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -319,7 +323,6 @@ split_signature = hashlib.sha256(
 ).hexdigest()[:16]
 
 assert time_train.max() < time_validation.min() < time_test.min()
-print(f"split signature: {split_signature}")
 print(
     f"train={len(y_train):,}, validation={len(y_validation):,}, "
     f"test={len(y_test):,}, history={HISTORY_HOURS} h, horizon={HORIZON_HOURS} h"
@@ -327,44 +330,62 @@ print(
 """
 
 DST_DISTRIBUTION = r"""
-fig, axes = plt.subplots(1, 2, figsize=(11, 3.5))
-axes[0].plot(frame["timestamp"], frame["Dst"], linewidth=0.5)
-axes[0].axvspan(pd.Timestamp("2014-01-01"), pd.Timestamp("2015-01-01"), alpha=0.15)
-axes[0].axvspan(pd.Timestamp("2015-01-01"), frame["timestamp"].max(), alpha=0.15)
-axes[0].set(title="Archived hourly Dst and fixed year partitions", ylabel="Dst [nT]")
-axes[1].hist(y_train, bins=50, alpha=0.8)
-axes[1].set(title="Training-target distribution", xlabel="Dst at forecast target [nT]")
+fig, axes = plt.subplots(1, 2, figsize=(11, 3.5), gridspec_kw={"width_ratios": [2.2, 1]})
+axes[0].plot(frame["timestamp"], frame["Dst"], linewidth=0.5, color="0.2")
+axes[0].axvspan(pd.Timestamp("2014-01-01"), pd.Timestamp("2015-01-01"), alpha=0.15, label="validation")
+axes[0].axvspan(pd.Timestamp("2015-01-01"), frame["timestamp"].max(), alpha=0.15, color="tab:red", label="test")
+axes[0].set(title="Hourly Dst, 2010-2015", ylabel="Dst [nT]")
+axes[0].legend(loc="lower left")
+axes[1].hist(y_train, bins=60, color="0.4")
+axes[1].set(title="Training targets", xlabel="Dst [nT]", yscale="log", ylabel="Hours")
 plt.tight_layout()
 plt.show()
+print(f"hours with Dst < -50 nT: train={np.sum(y_train < -50):,}, test={np.sum(y_test < -50):,}")
 """
 
 DST_METRICS = r"""
 def regression_metrics(y_true, y_prediction):
     return {
-        "mae": float(mean_absolute_error(y_true, y_prediction)),
-        "rmse": float(mean_squared_error(y_true, y_prediction) ** 0.5),
-        "r2": float(r2_score(y_true, y_prediction)),
+        "MAE [nT]": float(mean_absolute_error(y_true, y_prediction)),
+        "RMSE [nT]": float(mean_squared_error(y_true, y_prediction) ** 0.5),
+        "R²": float(r2_score(y_true, y_prediction)),
     }
 
 
 persistence_metrics = regression_metrics(y_test, persistence_test)
-print("persistence baseline:", persistence_metrics)
+print("persistence on 2015:", {key: round(value, 3) for key, value in persistence_metrics.items()})
 """
 
 DST_EVALUATION = r"""
 model_metrics = regression_metrics(y_test, predictions)
-persistence_skill = 1.0 - (
-    model_metrics["rmse"] ** 2 / persistence_metrics["rmse"] ** 2
-)
-print("model:", model_metrics)
-print(f"persistence skill: {persistence_skill:.4f}")
+# MSE skill score: the fraction of persistence's squared error that the model removes.
+persistence_skill = 1.0 - model_metrics["RMSE [nT]"] ** 2 / persistence_metrics["RMSE [nT]"] ** 2
+storm_hours = y_test < -50
+comparison = pd.DataFrame(
+    {
+        "neural model": model_metrics,
+        "persistence": persistence_metrics,
+        "neural model, Dst < -50 nT": regression_metrics(
+            y_test[storm_hours], predictions[storm_hours]
+        ),
+        "persistence, Dst < -50 nT": regression_metrics(
+            y_test[storm_hours], persistence_test[storm_hours]
+        ),
+    }
+).T
+display(comparison.round(3))
+print(f"MSE skill score relative to persistence: {persistence_skill:.3f}")
+"""
+
+DST_RECORD = r"""
+print(f"split signature: {split_signature}")
 print(
     "HELIO_RESULT "
     + json.dumps(
         {
             "split_signature": split_signature,
-            "model_rmse": model_metrics["rmse"],
-            "persistence_rmse": persistence_metrics["rmse"],
+            "model_rmse": model_metrics["RMSE [nT]"],
+            "persistence_rmse": persistence_metrics["RMSE [nT]"],
             "persistence_skill": persistence_skill,
             "prediction_shape": list(predictions.shape),
         },
@@ -376,167 +397,139 @@ assert np.isfinite(predictions).all()
 """
 
 DST_DIAGNOSTICS = r"""
-display_count = min(1000, len(y_test))
-worst = np.argsort(np.abs(y_test - predictions))[-8:][::-1]
+def plot_interval(axis, start, stop, title):
+    window = (time_test >= np.datetime64(start)) & (time_test < np.datetime64(stop))
+    axis.plot(time_test[window], y_test[window], color="black", label="observed")
+    axis.plot(time_test[window], predictions[window], label="neural model")
+    axis.plot(time_test[window], persistence_test[window], linestyle=":", label="persistence")
+    model_rmse = regression_metrics(y_test[window], predictions[window])["RMSE [nT]"]
+    persistence_rmse = regression_metrics(y_test[window], persistence_test[window])["RMSE [nT]"]
+    axis.set(title=f"{title}  (RMSE: model {model_rmse:.1f}, persistence {persistence_rmse:.1f} nT)", ylabel="Dst [nT]")
+    axis.grid(alpha=0.25)
+    axis.legend(loc="lower right")
 
-# Locate the strongest Dst decrease around 7 January 2015, then show a
-# focused 20-hour interval around the observed minimum.
-event_search = (
-    (time_test >= np.datetime64("2015-01-05"))
-    & (time_test < np.datetime64("2015-01-10"))
-)
-event_candidates = np.flatnonzero(event_search)
-event_center_index = event_candidates[np.argmin(y_test[event_candidates])]
-event_center = time_test[event_center_index]
-event_window = (
-    (time_test >= event_center - np.timedelta64(10, "h"))
-    & (time_test <= event_center + np.timedelta64(10, "h"))
-)
-event_model_metrics = regression_metrics(y_test[event_window], predictions[event_window])
-event_persistence_metrics = regression_metrics(
-    y_test[event_window], persistence_test[event_window]
-)
 
-fig, axes = plt.subplots(3, 1, figsize=(12, 10.5))
-axes[0].plot(time_test[:display_count], y_test[:display_count], label="observed", linewidth=1)
-axes[0].plot(time_test[:display_count], predictions[:display_count], label="neural model")
-axes[0].plot(
-    time_test[:display_count],
-    persistence_test[:display_count],
-    label="persistence",
-    linestyle=":",
+fig = plt.figure(figsize=(12, 10))
+grid = fig.add_gridspec(3, 2, height_ratios=[1, 1, 1.1])
+plot_interval(fig.add_subplot(grid[0, :]), "2015-01-01", "2015-02-12", "January 2015")
+plot_interval(
+    fig.add_subplot(grid[1, :]), "2015-03-16T12", "2015-03-20",
+    "St Patrick's Day storm, 17 March 2015",
 )
-axes[0].set(title="First test interval", ylabel="Dst [nT]")
-axes[0].legend()
-axes[1].scatter(predictions, y_test - predictions, s=8, alpha=0.35)
-axes[1].axhline(0, color="black", linewidth=1)
-axes[1].set(xlabel="Predicted Dst [nT]", ylabel="Residual [nT]", title="Test residuals")
-axes[2].plot(time_test[event_window], y_test[event_window], label="observed", marker="o")
-axes[2].plot(
-    time_test[event_window], predictions[event_window], label="neural model", marker="o"
-)
-axes[2].plot(
-    time_test[event_window],
-    persistence_test[event_window],
-    label="persistence",
-    marker="o",
-    linestyle=":",
-)
-axes[2].set(
-    title=f"Dst minimum near {str(event_center)[:13]} (±10 hours)",
-    xlabel="Target time",
-    ylabel="Dst [nT]",
-)
-axes[2].legend()
-axes[2].grid(alpha=0.25)
-axes[2].text(
-    0.01,
-    0.03,
-    (
-        f"Neural: MAE={event_model_metrics['mae']:.1f}, "
-        f"RMSE={event_model_metrics['rmse']:.1f} nT\n"
-        f"Persistence: MAE={event_persistence_metrics['mae']:.1f}, "
-        f"RMSE={event_persistence_metrics['rmse']:.1f} nT"
-    ),
-    transform=axes[2].transAxes,
-    fontsize=9,
-    bbox={"facecolor": "white", "alpha": 0.85, "edgecolor": "0.8"},
+residual_axis = fig.add_subplot(grid[2, 0])
+residual_axis.scatter(y_test, predictions - y_test, s=6, alpha=0.3)
+residual_axis.axhline(0, color="black", linewidth=1)
+residual_axis.set(xlabel="Observed Dst [nT]", ylabel="Model minus observed [nT]", title="Test residuals")
+change_axis = fig.add_subplot(grid[2, 1])
+observed_change = y_test - persistence_test
+change_axis.scatter(observed_change, predictions - persistence_test, s=6, alpha=0.3)
+limits = [observed_change.min(), observed_change.max()]
+change_axis.plot(limits, limits, color="black", linewidth=1, linestyle=":")
+change_axis.set(
+    xlabel="Observed 1-h change in Dst [nT]", ylabel="Predicted 1-h change [nT]",
+    title="Does the model anticipate changes?",
 )
 plt.tight_layout()
 plt.show()
 
-print(f"Focused interval center: {event_center}")
-print("Focused neural-model metrics:", event_model_metrics)
-print("Focused persistence metrics:", event_persistence_metrics)
-
-print("Largest absolute test errors:")
-for index in worst:
-    print(
-        str(time_test[index]),
-        f"observed={y_test[index]:.1f}",
-        f"predicted={predictions[index]:.1f}",
-        f"persistence={persistence_test[index]:.1f}",
-    )
+change_correlation = np.corrcoef(observed_change, predictions - persistence_test)[0, 1]
+print(f"correlation between observed and predicted 1-h change: {change_correlation:.2f}")
+worst = np.argsort(np.abs(y_test - predictions))[-8:][::-1]
+display(
+    pd.DataFrame(
+        {
+            "target time": [str(time_test[index])[:13] for index in worst],
+            "observed": y_test[worst],
+            "neural model": predictions[worst],
+            "persistence": persistence_test[worst],
+        }
+    ).round(1)
+)
 """
 
 
 def dst_cells(framework: str, artifact: str) -> list[nbformat.NotebookNode]:
-    role = "complete workflow"
     history = 3
-    framework_label = (
-        "Keras 3 — PyTorch Backend" if framework == "keras" else "Native PyTorch"
-    )
+    framework_label = "Keras 3" if framework == "keras" else "PyTorch"
     cells = [
         md(
             f"""
-# Dst Forecasting with {framework_label}
+# Dst Forecasting: {framework_label}
 
-This {role} implements the experiment in the
-[Dst Forecasting](index.md) chapter. The notebook forms gap-safe windows
-inside fixed year partitions and evaluates a one-hour-ahead forecast against
-true forecast-origin persistence.
+The Dst index measures the depression of the horizontal geomagnetic field at
+low latitudes, mainly from the storm-time ring current. This notebook
+forecasts hourly Dst one hour ahead from the previous three hours of solar
+wind and Dst, and asks a single question: does a small neural network beat
+persistence, the forecast that nothing changes?
 
-In Colab, select **Runtime → Run all**; the data cell downloads and verifies
-only the archived OMNI file when no local checkout is available. To run the
-example more quickly, set `EPOCHS` to 1 or 2 in the data-preparation cell.
+The data are hourly OMNI2 values for 2010-2015. The model trains on
+2010-2013, 2014 serves for early stopping, and 2015, which contains the
+strongest storm of solar cycle 24, is the test year. See the
+[Dst Forecasting](index.md) chapter for an overview. Set `EPOCHS` to 1 or 2 in
+the data cell for a quicker run.
 """
         ),
         md(
-            """## Imports and reproducibility
+            """## Imports
 
-These imports provide the numerical, plotting, and evaluation tools used below.
-The fixed seed makes repeated runs easier to compare."""
+A fixed seed makes repeated runs comparable."""
         ),
-        code(DST_IMPORTS),
+        code(DST_IMPORTS, "hide-input"),
         md(
-            """## Resolve the archived dataset
+            """## Load the OMNI data
 
-The example uses the hourly OMNI2 archive for 2010–2015. The file is verified
-before it is read so the two implementations use exactly the same measurements."""
+The archived OMNI2 file is downloaded once and checked against its SHA-256
+checksum. OMNI solar-wind values are already time-shifted from the upstream
+spacecraft to the bow-shock nose, so the inputs at hour $t$ describe the solar
+wind arriving at Earth at hour $t$."""
         ),
-        code(DST_DATA_BOOTSTRAP),
+        code(DST_DATA_BOOTSTRAP, "hide-input"),
         md(
-            """## Parse data, form windows, and fit training-only preprocessing
+            """## Build forecast windows
 
-Each sample contains the preceding three hourly values of the solar-wind and
-Dst inputs. The target is Dst one hour after the latest input, and windows are
-formed only across contiguous hourly measurements."""
+Each sample contains the preceding three hourly values of solar-wind speed
+$V$, the GSM $B_z$ component, field magnitude $|B|$, and Dst: twelve inputs
+in all. The target is Dst one hour after the latest input. Windows that span a
+data gap are dropped, and each year partition is windowed separately so no
+sample crosses a split boundary. The input scaling is fitted on 2010-2013
+only."""
         ),
         code(DST_PREPARE.replace("HISTORY_HOURS_SETTING", str(history))),
         md(
-            """## Inspect coverage and the training target
+            """## Look at the data
 
-The time series shows the fixed year partitions, while the histogram summarizes
-the Dst values available for fitting the model."""
+Storms are rare: most hours sit within a few tens of nanotesla of zero, so the
+training targets are dominated by quiet conditions."""
         ),
         code(DST_DISTRIBUTION),
         md(
-            """## Establish the persistence baseline
+            """## Persistence baseline
 
 For a one-hour forecast, persistence assumes that Dst remains at its value at
-the forecast origin. This is a demanding and physically meaningful reference
-for a short-horizon forecast."""
+the forecast origin: $\\widehat{Dst}(t+1) = Dst(t)$. Dst changes slowly
+outside storms, so this is a demanding reference, and a model is useful only
+if it beats it."""
         ),
         code(DST_METRICS),
     ]
     if framework == "keras":
-        cells.extend(
-            [
-                md(
-                    """## Define the Keras model
+        model_cells = [
+            md(
+                """## Define the Keras model
 
-This small network maps the three-hour input state to one Dst prediction. The
-two hidden layers retain the structure of the original example."""
-                ),
-                code(
-                    r"""
+Two hidden layers of 50 and 30 ReLU units map the twelve inputs to one Dst
+value. The loss is the mean squared error."""
+            ),
+            code(
+                r"""
 os.environ["KERAS_BACKEND"] = "torch"
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")  # Deterministic cuBLAS on GPUs.
 import keras
 import torch
 from keras import layers
 
 keras.utils.set_random_seed(SEED)
-torch.use_deterministic_algorithms(True)  # Prefer repeatable operations when available.
+torch.use_deterministic_algorithms(True, warn_only=True)
 assert keras.backend.backend() == "torch"
 # Define the neural network used for the Dst forecast.
 model = keras.Sequential(
@@ -548,75 +541,70 @@ model = keras.Sequential(
     ],
     name="dst_forecast",
 )
-model.compile(
-    optimizer=keras.optimizers.Adam(),  # Adam updates the model weights.
-    loss="mse",  # Mean-squared error for the continuous Dst target.
-)
+model.compile(optimizer=keras.optimizers.Adam(), loss="mse")
 model.summary()
 """
-                ),
-                md(
-                    """## Train with validation-based early stopping
+            ),
+            md(
+                """## Train with early stopping
 
-The model is fitted on 2010–2013 and monitored on 2014. Early stopping restores
-the state with the lowest validation loss before the 2015 evaluation."""
-                ),
-                code(
-                    r"""
-callbacks = [
-    keras.callbacks.EarlyStopping(
-        monitor="val_loss", patience=3, restore_best_weights=True
-    )
-]
+The model fits on 2010-2013 and is checked on 2014 after each epoch. Training
+stops after three epochs without improvement, and the weights with the lowest
+validation loss are restored."""
+            ),
+            code(
+                r"""
 history = model.fit(
     x_train,
     y_train,
     validation_data=(x_validation, y_validation),
     epochs=EPOCHS,
     batch_size=BATCH_SIZE,
-    callbacks=callbacks,
-    verbose=2,
+    callbacks=[
+        keras.callbacks.EarlyStopping(
+            monitor="val_loss", patience=3, restore_best_weights=True
+        )
+    ],
+    verbose=0,
 )
 fig, ax = plt.subplots(figsize=(6, 3.5))
 ax.plot(history.history["loss"], marker="o", label="training")
 ax.plot(history.history["val_loss"], marker="o", label="validation")
-ax.set(title="Mean-squared error", xlabel="Epoch", ylabel="MSE")
+ax.set(title="Mean squared error", xlabel="Epoch", ylabel="MSE [nT²]")
 ax.legend()
 ax.grid(alpha=0.25)
 plt.show()
 """
-                ),
-                md(
-                    """## Evaluate the untouched test year
+            ),
+            md(
+                """## Evaluate on 2015
 
-The final metrics use 2015 only after training and model selection are complete.
-Persistence skill is reported without assuming that the neural model must win."""
-                ),
-                code(
-                    r"""
-predictions = model.predict(x_test, batch_size=BATCH_SIZE, verbose=0).reshape(-1)
-"""
-                    + DST_EVALUATION
-                ),
-            ]
-        )
+The test year is used once, after training is complete. Storm hours
+(Dst < -50 nT) are scored separately, because an overall RMSE is dominated by
+quiet time."""
+            ),
+            code(
+                "predictions = model.predict(x_test, batch_size=BATCH_SIZE, verbose=0).reshape(-1)\n"
+                + DST_EVALUATION
+            ),
+        ]
     else:
-        cells.extend(
-            [
-                md(
-                    """## Define the PyTorch model
+        model_cells = [
+            md(
+                """## Define the PyTorch model
 
-This small network maps the three-hour input state to one Dst prediction. The
-two hidden layers retain the structure of the original example."""
-                ),
-                code(
-                    r"""
+Two hidden layers of 50 and 30 ReLU units map the twelve inputs to one Dst
+value. The loss is the mean squared error."""
+            ),
+            code(
+                r"""
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 torch.manual_seed(SEED)
-torch.use_deterministic_algorithms(True)  # Prefer repeatable operations when available.
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")  # Deterministic cuBLAS on GPUs.
+torch.use_deterministic_algorithms(True, warn_only=True)
 DEVICE = torch.device(
     "cuda" if torch.cuda.is_available()
     else "mps" if torch.backends.mps.is_available()
@@ -641,25 +629,25 @@ class DstRegressor(nn.Module):
 
 
 model = DstRegressor(x_train.shape[1]).to(DEVICE)
-optimizer = torch.optim.Adam(model.parameters())  # Adam updates the model weights.
-loss_function = nn.MSELoss()  # Mean-squared error for the continuous Dst target.
+optimizer = torch.optim.Adam(model.parameters())
+loss_function = nn.MSELoss()
 print(model)
 """
-                ),
-                md(
-                    """## Train and restore the best validation state
+            ),
+            md(
+                """## Train with early stopping
 
-The explicit loop fits on 2010–2013 and checks 2014 after each epoch. We retain
-the state with the lowest validation loss for the final 2015 evaluation."""
-                ),
-                code(
-                    r"""
-generator = torch.Generator().manual_seed(SEED)
+The loop fits on 2010-2013 and checks 2014 after each epoch. Training stops
+after three epochs without improvement, and the state with the lowest
+validation loss is restored."""
+            ),
+            code(
+                r"""
 train_loader = DataLoader(
     TensorDataset(torch.from_numpy(x_train), torch.from_numpy(y_train)),
     batch_size=BATCH_SIZE,
     shuffle=True,
-    generator=generator,
+    generator=torch.Generator().manual_seed(SEED),
 )
 x_validation_tensor = torch.from_numpy(x_validation).to(DEVICE)
 y_validation_tensor = torch.from_numpy(y_validation).to(DEVICE)
@@ -682,14 +670,9 @@ for epoch in range(EPOCHS):
             model(x_validation_tensor), y_validation_tensor
         ).item()
     validation_loss.append(current_validation)
-    print(
-        f"epoch {epoch + 1}: loss={training_loss[-1]:.3f}, "
-        f"val_loss={current_validation:.3f}"
-    )
     if current_validation < best_validation:
-        best_validation = current_validation
+        best_validation, stale_epochs = current_validation, 0
         best_state = {name: value.detach().clone() for name, value in model.state_dict().items()}
-        stale_epochs = 0
     else:
         stale_epochs += 1
         if stale_epochs >= 3:
@@ -699,38 +682,56 @@ model.load_state_dict(best_state)
 fig, ax = plt.subplots(figsize=(6, 3.5))
 ax.plot(training_loss, marker="o", label="training")
 ax.plot(validation_loss, marker="o", label="validation")
-ax.set(title="Mean-squared error", xlabel="Epoch", ylabel="MSE")
+ax.set(title="Mean squared error", xlabel="Epoch", ylabel="MSE [nT²]")
 ax.legend()
 ax.grid(alpha=0.25)
 plt.show()
 """
-                ),
-                md(
-                    """## Evaluate the untouched test year
+            ),
+            md(
+                """## Evaluate on 2015
 
-The final metrics use 2015 only after training and model selection are complete.
-Persistence skill is reported without assuming that the neural model must win."""
-                ),
-                code(
-                    r"""
+The test year is used once, after training is complete. Storm hours
+(Dst < -50 nT) are scored separately, because an overall RMSE is dominated by
+quiet time."""
+            ),
+            code(
+                r"""
 model.eval()
 with torch.no_grad():
     predictions = model(torch.from_numpy(x_test).to(DEVICE)).cpu().numpy()
 """
-                    + DST_EVALUATION
-                ),
-            ]
-        )
+                + DST_EVALUATION
+            ),
+        ]
+    cells.extend(model_cells)
     cells.extend(
         [
+            code(DST_RECORD, "remove-cell"),
             md(
-                """## Diagnose timing and residual errors
+                """## Where the errors are
 
-The time traces show whether the model follows the evolution of Dst, while the
-residual plot exposes systematic errors. The final panel focuses on the January
-2015 minimum, where timing and amplitude are easier to inspect directly."""
+The top panels follow a quiet month and the St Patrick's Day storm, whose
+Dst minimum of about -223 nT is the lowest in this six-year record. The lower-left
+panel shows residuals against observed Dst; the lower-right panel asks
+whether the model predicts the *change* in Dst over the next hour, which is
+the only part of the forecast persistence cannot supply."""
             ),
             code(DST_DIAGNOSTICS),
+            md(
+                """## What the results show
+
+The network beats persistence on 2015 as a whole, with an RMSE of about
+3.7 nT against 4.8 nT, and by a wider margin during storm hours. It does so
+by predicting part of the change over the next hour: the correlation between
+predicted and observed one-hour changes is about 0.6. The largest errors are
+the abrupt changes, among them the positive jump at the St Patrick's Day
+sudden commencement and the storm minimum itself, which both the network and
+persistence miss by more than 30 nT. With one hour of lead time and three
+hours of history, the inputs carry little warning of such changes. One test
+year with one major storm is a small sample, so the storm-hour scores in
+particular are uncertain."""
+            ),
         ]
     )
     return cells
@@ -742,7 +743,7 @@ def generate_dst() -> None:
         artifacts = ("demo",)
         for artifact in artifacts:
             notebook = make_notebook(
-                title=f"Dst Forecasting — Complete Workflow ({'Keras on Torch' if framework == 'keras' else 'Native PyTorch'})",
+                title=f"Dst Forecasting: {'Keras 3' if framework == 'keras' else 'PyTorch'}",
                 module_id="dst-forecasting",
                 framework=framework,
                 artifact=artifact,
@@ -758,6 +759,7 @@ import json
 import os
 
 os.environ["KERAS_BACKEND"] = "torch"
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")  # Deterministic cuBLAS on GPUs.
 
 import keras
 import matplotlib.pyplot as plt
@@ -773,10 +775,7 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 
 assert keras.backend.backend() == "torch"
-print(
-    f"Keras {keras.__version__}; backend={keras.backend.backend()}; "
-    f"PyTorch {torch.__version__}"
-)
+print(f"Keras {keras.__version__}, backend {keras.backend.backend()}, PyTorch {torch.__version__}")
 """
 
 IMAGE_TORCH_IMPORTS = r"""
@@ -803,8 +802,16 @@ from torchvision import datasets
 print(f"PyTorch {torch.__version__}")
 """
 
+CLASS_NAMES = {
+    "mnist": [str(digit) for digit in range(10)],
+    "cifar10": [
+        "airplane", "automobile", "bird", "cat", "deer",
+        "dog", "frog", "horse", "ship", "truck",
+    ],
+}
 
-def image_data_code(framework: str, dataset: str, epochs: int, batch_size: int) -> str:
+
+def image_data_code(framework: str, dataset: str, epochs: int | None, batch_size: int) -> str:
     validation_size = 10_000 if dataset == "mnist" else 5_000
     shape_keras = (
         'x_train = x_train[..., np.newaxis]\n'
@@ -819,6 +826,7 @@ def image_data_code(framework: str, dataset: str, epochs: int, batch_size: int) 
         'x_test = x_test[:, np.newaxis, ...]'
         if dataset == "mnist"
         else (
+            '# PyTorch expects (sample, channel, height, width).\n'
             'x_train = np.transpose(x_train, (0, 3, 1, 2))\n'
             'x_validation = np.transpose(x_validation, (0, 3, 1, 2))\n'
             'x_test = np.transpose(x_test, (0, 3, 1, 2))'
@@ -838,7 +846,7 @@ def image_data_code(framework: str, dataset: str, epochs: int, batch_size: int) 
         )
         seed = """
 keras.utils.set_random_seed(SEED)
-torch.use_deterministic_algorithms(True)
+torch.use_deterministic_algorithms(True, warn_only=True)
 """
         shape = shape_keras
     else:
@@ -870,7 +878,8 @@ y_test = {test_y_attr}
 random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
-torch.use_deterministic_algorithms(True)
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")  # Deterministic cuBLAS on GPUs.
+torch.use_deterministic_algorithms(True, warn_only=True)
 DEVICE = torch.device(
     "cuda" if torch.cuda.is_available()
     else "mps" if torch.backends.mps.is_available()
@@ -878,11 +887,12 @@ DEVICE = torch.device(
 )
 """
         shape = shape_torch
+    epochs_line = f"EPOCHS = {epochs}  # Reduce to 1 or 2 for a quicker run.\n" if epochs else ""
     return dedent(
         f"""
 SEED = 42
-EPOCHS = {epochs}  # Reduce to 1 or 2 for a quicker run.
-BATCH_SIZE = {batch_size}
+{epochs_line}BATCH_SIZE = {batch_size}
+CLASS_NAMES = {CLASS_NAMES[dataset]!r}
 {seed}
 {load}
 all_indices = np.arange(len(y_development))
@@ -896,6 +906,7 @@ split_signature = hashlib.sha256(
     validation_indices.astype("<i8").tobytes()
 ).hexdigest()[:16]
 
+# Scale pixel values from 0-255 to 0-1.
 x_train = x_development[train_indices].astype("float32") / 255.0
 y_train = y_development[train_indices].astype(np.int64)
 x_validation = x_development[validation_indices].astype("float32") / 255.0
@@ -905,190 +916,213 @@ y_test = y_test.astype(np.int64)
 {shape}
 
 assert set(train_indices).isdisjoint(validation_indices)
-print(f"split signature: {{split_signature}}")
 print(
     f"train={{len(y_train):,}}, validation={{len(y_validation):,}}, "
-    f"test={{len(y_test):,}}, epochs={{EPOCHS}}"
+    f"test={{len(y_test):,}}, image shape={{x_train.shape[1:]}}"
 )
 """
     ).strip()
 
 
-IMAGE_DISTRIBUTION = r"""
-training_counts = np.bincount(y_train, minlength=10)
-fig, ax = plt.subplots(figsize=(8, 3.2))
-ax.bar(np.arange(10), training_counts)
-ax.set(
-    title="Training-set class distribution",
-    xlabel="Class",
-    ylabel="Samples",
-    xticks=np.arange(10),
-)
-plt.show()
+AS_IMAGE = r"""
+def as_image(sample):
+    # Convert one stored sample to (height, width[, channel]) for plotting.
+    if sample.ndim == 1:
+        sample = sample.reshape(28, 28)
+    if sample.ndim == 3 and sample.shape[0] in (1, 3):
+        sample = np.transpose(sample, (1, 2, 0))
+    return sample.squeeze()
 """
 
-IMAGE_KERAS_TRAIN = r"""
-model.compile(
-    optimizer=keras.optimizers.Adam(),
-    loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
-    metrics=["accuracy"],
-)
-model.summary()
-history = model.fit(
-    x_train,
-    y_train,
-    validation_data=(x_validation, y_validation),
-    epochs=EPOCHS,
-    batch_size=BATCH_SIZE,
-    verbose=2,
-)
-fig, axes = plt.subplots(1, 2, figsize=(10, 3.5))
-axes[0].plot(history.history["loss"], marker="o", label="training")
-axes[0].plot(history.history["val_loss"], marker="o", label="validation")
-axes[0].set(title="Cross-entropy loss", xlabel="Epoch")
-axes[1].plot(history.history["accuracy"], marker="o", label="training")
-axes[1].plot(history.history["val_accuracy"], marker="o", label="validation")
-axes[1].set(title="Accuracy", xlabel="Epoch")
-for axis in axes:
-    axis.legend()
-    axis.grid(alpha=0.25)
+IMAGE_DISTRIBUTION = AS_IMAGE + r"""
+
+fig = plt.figure(figsize=(12, 3.6))
+grid = fig.add_gridspec(2, 10, height_ratios=[1, 1.2])
+for label in range(10):
+    axis = fig.add_subplot(grid[0, label])
+    image = as_image(x_train[np.flatnonzero(y_train == label)[0]])
+    axis.imshow(image, cmap="gray" if image.ndim == 2 else None)
+    axis.set_title(CLASS_NAMES[label], fontsize=9)
+    axis.axis("off")
+counts_axis = fig.add_subplot(grid[1, :])
+counts_axis.bar(CLASS_NAMES, np.bincount(y_train, minlength=10), color="0.45")
+counts_axis.set(ylabel="Training images")
 plt.tight_layout()
 plt.show()
 """
 
-IMAGE_TORCH_TRAIN = r"""
-def tensor_dataset(images, labels):
-    return TensorDataset(torch.from_numpy(images), torch.from_numpy(labels).long())
-
-
-generator = torch.Generator().manual_seed(SEED)
-train_loader = DataLoader(
-    tensor_dataset(x_train, y_train),
-    batch_size=BATCH_SIZE,
-    shuffle=True,
-    generator=generator,
-)
-validation_loader = DataLoader(
-    tensor_dataset(x_validation, y_validation), batch_size=BATCH_SIZE
-)
-test_loader = DataLoader(tensor_dataset(x_test, y_test), batch_size=BATCH_SIZE)
-model = model.to(DEVICE)
-optimizer = torch.optim.Adam(model.parameters())
+TORCH_TRAINING_HELPERS = r"""
 loss_function = nn.CrossEntropyLoss()
-history = {"loss": [], "val_loss": [], "accuracy": [], "val_accuracy": []}
 
 
-def epoch_pass(loader, training):
+def make_loader(images, labels, shuffle=False):
+    dataset = TensorDataset(torch.from_numpy(images), torch.from_numpy(labels).long())
+    generator = torch.Generator().manual_seed(SEED) if shuffle else None
+    return DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=shuffle, generator=generator)
+
+
+def run_epoch(model, loader, optimizer=None):
+    # One pass over `loader`; the weights are updated only if an optimizer is given.
+    training = optimizer is not None
     model.train(training)
-    total_loss = 0.0
-    correct = 0
-    for features, target in loader:
-        features, target = features.to(DEVICE), target.to(DEVICE)
-        if training:
-            optimizer.zero_grad()
-        logits = model(features)
-        loss = loss_function(logits, target)
-        if training:
-            loss.backward()
-            optimizer.step()
-        total_loss += loss.item() * len(target)
-        correct += (logits.argmax(1) == target).sum().item()
+    total_loss, correct = 0.0, 0
+    with torch.set_grad_enabled(training):
+        for images, labels in loader:
+            images, labels = images.to(DEVICE), labels.to(DEVICE)
+            logits = model(images)
+            loss = loss_function(logits, labels)
+            if training:
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+            total_loss += loss.item() * len(labels)
+            correct += (logits.argmax(dim=1) == labels).sum().item()
     return total_loss / len(loader.dataset), correct / len(loader.dataset)
 
 
-for epoch in range(EPOCHS):
-    train_loss, train_accuracy = epoch_pass(train_loader, True)
+def fit(model, epochs, learning_rate=1e-3, train=None, validation=None, verbose=True):
+    # Train with Adam and restore the epoch with the best validation accuracy.
+    train_loader = make_loader(*(train or (x_train, y_train)), shuffle=True)
+    validation_loader = make_loader(*(validation or (x_validation, y_validation)))
+    model.to(DEVICE)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    history = {"loss": [], "accuracy": [], "val_loss": [], "val_accuracy": []}
+    best_state, best_accuracy = None, -1.0
+    for epoch in range(epochs):
+        scores = (*run_epoch(model, train_loader, optimizer), *run_epoch(model, validation_loader))
+        for key, value in zip(history, scores):
+            history[key].append(value)
+        if verbose:
+            print(
+                f"epoch {epoch + 1:2d}: loss={scores[0]:.4f}  accuracy={scores[1]:.4f}  "
+                f"val_loss={scores[2]:.4f}  val_accuracy={scores[3]:.4f}"
+            )
+        if scores[3] > best_accuracy:
+            best_accuracy = scores[3]
+            best_state = {key: value.detach().clone() for key, value in model.state_dict().items()}
+    model.load_state_dict(best_state)
+    if verbose:
+        best_epoch = int(np.argmax(history["val_accuracy"])) + 1
+        print(f"restored epoch {best_epoch} (validation accuracy {best_accuracy:.4f})")
+    return history
+
+
+def predict_classes(model, images):
+    model.eval()
     with torch.no_grad():
-        validation_loss, validation_accuracy = epoch_pass(validation_loader, False)
-    history["loss"].append(train_loss)
-    history["accuracy"].append(train_accuracy)
-    history["val_loss"].append(validation_loss)
-    history["val_accuracy"].append(validation_accuracy)
-    print(
-        f"epoch {epoch + 1}: loss={train_loss:.4f}, accuracy={train_accuracy:.4f}, "
-        f"val_loss={validation_loss:.4f}, val_accuracy={validation_accuracy:.4f}"
+        return np.concatenate(
+            [model(batch.to(DEVICE)).argmax(dim=1).cpu().numpy()
+             for (batch, _) in make_loader(images, np.zeros(len(images), dtype=np.int64))]
+        )
+"""
+
+KERAS_TRAINING_HELPERS = r"""
+def fit(model, epochs, learning_rate=1e-3, train=None, validation=None, verbose=True):
+    # Train with Adam and restore the epoch with the best validation accuracy.
+    model.compile(
+        optimizer=keras.optimizers.Adam(learning_rate),
+        loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+        metrics=["accuracy"],
     )
-
-fig, axes = plt.subplots(1, 2, figsize=(10, 3.5))
-axes[0].plot(history["loss"], marker="o", label="training")
-axes[0].plot(history["val_loss"], marker="o", label="validation")
-axes[0].set(title="Cross-entropy loss", xlabel="Epoch")
-axes[1].plot(history["accuracy"], marker="o", label="training")
-axes[1].plot(history["val_accuracy"], marker="o", label="validation")
-axes[1].set(title="Accuracy", xlabel="Epoch")
-for axis in axes:
-    axis.legend()
-    axis.grid(alpha=0.25)
-plt.tight_layout()
-plt.show()
-"""
-
-
-def image_evaluation_code(framework: str) -> str:
-    inference = (
-        """
-test_logits = model.predict(x_test, batch_size=BATCH_SIZE, verbose=0)
-test_predictions = test_logits.argmax(axis=1)
-"""
-        if framework == "keras"
-        else """
-model.eval()
-prediction_parts = []
-with torch.no_grad():
-    for features, _ in test_loader:
-        prediction_parts.append(model(features.to(DEVICE)).argmax(1).cpu().numpy())
-test_predictions = np.concatenate(prediction_parts)
-"""
+    keep_best = keras.callbacks.EarlyStopping(
+        monitor="val_accuracy", mode="max", patience=epochs, restore_best_weights=True
     )
+    history = model.fit(
+        *(train or (x_train, y_train)),
+        validation_data=validation or (x_validation, y_validation),
+        epochs=epochs,
+        batch_size=BATCH_SIZE,
+        callbacks=[keep_best],
+        verbose=2 if verbose else 0,
+    ).history
+    if verbose:
+        best_epoch = int(np.argmax(history["val_accuracy"]))
+        print(
+            f"restored epoch {best_epoch + 1} "
+            f"(validation accuracy {history['val_accuracy'][best_epoch]:.4f})"
+        )
+    return history
+
+
+def predict_classes(model, images):
+    return model.predict(images, batch_size=BATCH_SIZE, verbose=0).argmax(axis=1)
+"""
+
+PLOT_HISTORY = r"""
+def plot_history(history, title=None):
+    epochs = np.arange(1, len(history["loss"]) + 1)
+    best = epochs[int(np.argmax(history["val_accuracy"]))]
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.4))
+    for axis, key, label in zip(axes, ("loss", "accuracy"), ("Cross-entropy loss", "Accuracy")):
+        axis.plot(epochs, history[key], marker="o", label="training")
+        axis.plot(epochs, history[f"val_{key}"], marker="o", label="validation")
+        axis.axvline(best, color="0.6", linestyle=":", label="restored epoch")
+        axis.set(title=label, xlabel="Epoch")
+        axis.grid(alpha=0.25)
+    axes[0].legend()
+    if title:
+        fig.suptitle(title)
+    plt.tight_layout()
+    plt.show()
+"""
+
+
+def training_helpers(framework: str) -> str:
+    helpers = KERAS_TRAINING_HELPERS if framework == "keras" else TORCH_TRAINING_HELPERS
+    return helpers + "\n\n" + PLOT_HISTORY
+
+
+def image_evaluation_code(images: str = "x_test", inputs: str = "x_test") -> str:
     return dedent(
         f"""
-{inference}
+test_predictions = predict_classes(model, {inputs})
 test_accuracy = accuracy_score(y_test, test_predictions)
 cm = confusion_matrix(y_test, test_predictions, labels=np.arange(10))
 print(f"test accuracy: {{test_accuracy:.4f}}")
 print(
     classification_report(
-        y_test,
-        test_predictions,
-        labels=np.arange(10),
-        digits=3,
-        zero_division=0,
+        y_test, test_predictions, labels=np.arange(10),
+        target_names=CLASS_NAMES, digits=3, zero_division=0,
     )
 )
+
+fig, ax = plt.subplots(figsize=(7, 6))
+ConfusionMatrixDisplay(cm, display_labels=CLASS_NAMES).plot(
+    ax=ax, colorbar=False, values_format="d", xticks_rotation=45
+)
+ax.set_title("Test confusion matrix (rows: true class)")
+plt.show()
+
+mistakes = np.flatnonzero(test_predictions != y_test)[:12]
+fig, axes = plt.subplots(2, 6, figsize=(12, 4.6))
+for axis in axes.flat:
+    axis.axis("off")
+for axis, index in zip(axes.flat, mistakes):
+    image = as_image({images}[index])
+    axis.imshow(image, cmap="gray" if image.ndim == 2 else None)
+    axis.set_title(f"{{CLASS_NAMES[y_test[index]]}} as {{CLASS_NAMES[test_predictions[index]]}}", fontsize=9)
+fig.suptitle("First twelve test mistakes (true as predicted)")
+plt.tight_layout()
+plt.show()
+"""
+    ).strip()
+
+
+IMAGE_RECORD = r"""
+print(f"split signature: {split_signature}")
 print(
     "HELIO_RESULT "
     + json.dumps(
-        {{
+        {
             "split_signature": split_signature,
             "test_accuracy": float(test_accuracy),
             "confusion_shape": list(cm.shape),
-        }},
+        },
         sort_keys=True,
     )
 )
 assert cm.shape == (10, 10)
-
-fig, ax = plt.subplots(figsize=(7, 6))
-ConfusionMatrixDisplay(cm, display_labels=np.arange(10)).plot(
-    ax=ax, colorbar=False, values_format="d"
-)
-ax.set_title("Test confusion matrix")
-plt.show()
-
-mistakes = np.flatnonzero(test_predictions != y_test)[:12]
-if len(mistakes):
-    fig, axes = plt.subplots(3, 4, figsize=(9, 7))
-    for axis, index in zip(axes.flat, mistakes):
-        image = x_test[index]
-        if image.shape[0] in (1, 3):
-            image = np.transpose(image, (1, 2, 0))
-        axis.imshow(image.squeeze(), cmap="gray" if image.squeeze().ndim == 2 else None)
-        axis.set_title(f"true={{y_test[index]}}, pred={{test_predictions[index]}}")
-        axis.axis("off")
-    plt.tight_layout()
-    plt.show()
 """
-    ).strip()
 
 
 def image_model_code(framework: str, architecture: str) -> str:
@@ -1111,6 +1145,7 @@ model = keras.Sequential(
     ],
     name="mnist_cnn",
 )
+model.summary()
 """,
             "cifar_simple": r"""
 model = keras.Sequential(
@@ -1129,8 +1164,9 @@ model = keras.Sequential(
         layers.Dropout(0.5),
         layers.Dense(10),
     ],
-    name="cifar10_simple",
+    name="cifar10_small",
 )
+model.summary()
 """,
             "cifar_advanced": r"""
 model = keras.Sequential(
@@ -1157,8 +1193,9 @@ model = keras.Sequential(
         layers.Dropout(0.5),
         layers.Dense(10),
     ],
-    name="cifar10_advanced",
+    name="cifar10_deeper",
 )
+model.summary()
 """,
         }
         return definitions[architecture]
@@ -1183,9 +1220,10 @@ class ImageClassifier(nn.Module):
 
 model = ImageClassifier()
 print(model)
+print(f"trainable parameters: {sum(p.numel() for p in model.parameters()):,}")
 """,
         "cifar_simple": r"""
-class ImageClassifier(nn.Module):
+class SmallNetwork(nn.Module):
     def __init__(self):
         super().__init__()
         self.features = nn.Sequential(
@@ -1201,11 +1239,11 @@ class ImageClassifier(nn.Module):
         return self.classifier(self.features(values))
 
 
-model = ImageClassifier()
-print(model)
+model = SmallNetwork()
+print(f"trainable parameters: {sum(p.numel() for p in model.parameters()):,}")
 """,
         "cifar_advanced": r"""
-class ImageClassifier(nn.Module):
+class DeeperNetwork(nn.Module):
     def __init__(self):
         super().__init__()
         self.features = nn.Sequential(
@@ -1225,134 +1263,255 @@ class ImageClassifier(nn.Module):
         return self.classifier(self.features(values))
 
 
-model = ImageClassifier()
-print(model)
+model = DeeperNetwork()
+print(f"trainable parameters: {sum(p.numel() for p in model.parameters()):,}")
 """,
     }
     return definitions[architecture]
 
 
-def paired_image_cells(
-    *,
-    title: str,
-    chapter: str,
-    framework: str,
-    artifact: str,
-    dataset: str,
-    architecture: str,
-    epochs: int,
-    batch_size: int,
-) -> list[nbformat.NotebookNode]:
-    label = "Keras 3" if framework == "keras" else "PyTorch"
-    role = "complete workflow"
-    cells = [
+def framework_name(framework: str) -> str:
+    return "Keras 3" if framework == "keras" else "PyTorch"
+
+
+SETUP_TEXT = "## Setup\n\nThe libraries used below."
+
+MNIST_SPLIT_TEXT = """## Load MNIST and split it
+
+The 60,000 official training images are split, with a fixed seed and
+stratified by class, into 50,000 for training and 10,000 for validation. The
+10,000 official test images are used once, at the end."""
+
+CIFAR_SPLIT_TEXT = """## Load CIFAR-10 and split it
+
+The 50,000 official training images are split, with a fixed seed and
+stratified by class, into 45,000 for training and 5,000 for validation. The
+10,000 official test images are used once, at the end."""
+
+LOOK_TEXT = """## Look at the data
+
+One example per class and the number of training images in each. The classes
+are balanced, so accuracy is a fair summary of performance."""
+
+
+def training_text(framework: str) -> str:
+    if framework == "keras":
+        return """## Training loop
+
+`fit()` below compiles the model with the Adam optimizer and the
+cross-entropy loss, trains it, and uses a callback to restore the weights
+from the epoch with the best validation accuracy."""
+    return """## Training loop
+
+Each epoch passes once over the training images in mini-batches. For each
+batch, `run_epoch` computes the cross-entropy loss (the negative
+log-probability given to the correct class), backpropagates its gradient, and
+lets the Adam optimizer update the weights. After each epoch `fit` scores the
+validation set, and at the end it restores the weights from the epoch with
+the best validation accuracy."""
+
+
+def mnist_cnn_cells(framework: str) -> list[nbformat.NotebookNode]:
+    return [
         md(
             f"""
-# {title} with {label}
+# Convolutional Network for MNIST: {framework_name(framework)}
 
-This {role} belongs to [{chapter}](index.md). Keras and PyTorch use the same
-seeded indices, normalization, architecture intent, training budget, metrics,
-and diagnostic figures.
-
-In Colab, select **Runtime → Run all**; the canonical dataset is downloaded by
-the framework. To run the example more quickly, set `EPOCHS` to 1 or 2 in the
-data-loading cell.
+A dense network treats an image as a list of 784 numbers and ignores which
+pixels are neighbours. A convolutional network slides small learned filters
+across the image, so the same stroke detector is applied everywhere, and
+pooling coarsens the image so that later filters see larger regions. This
+notebook trains one on the MNIST digits, with the split used in the
+[Neural Networks](../../neural-networks/index.md) chapter. Set `EPOCHS` to 1
+or 2 in the data cell for a quicker run.
 """
         ),
-        md("## Imports and reproducibility"),
-        code(IMAGE_KERAS_IMPORTS if framework == "keras" else IMAGE_TORCH_IMPORTS),
-        md("## Load data and create the shared split"),
-        code(image_data_code(framework, dataset, epochs, batch_size)),
-        md("## Inspect class coverage"),
+        md(SETUP_TEXT),
+        code(IMAGE_KERAS_IMPORTS if framework == "keras" else IMAGE_TORCH_IMPORTS, "hide-input"),
+        md(MNIST_SPLIT_TEXT),
+        code(image_data_code(framework, "mnist", 5, 256)),
+        md(LOOK_TEXT),
         code(IMAGE_DISTRIBUTION),
+        md(
+            """## Define the model
+
+Two 3×3 convolution layers with 32 and 64 filters, each followed by a ReLU
+and 2×2 max pooling, turn a 28×28 image into 64 feature maps of 5×5 pixels.
+Dropout then zeroes a random quarter of those activations during training, a
+guard against relying on any single feature. Two dense layers produce ten
+logits, one unnormalized score per digit."""
+        ),
+        code(image_model_code(framework, "mnist")),
+        md(training_text(framework)),
+        code(training_helpers(framework)),
+        code("history = fit(model, EPOCHS)\nplot_history(history)"),
+        md(
+            """## Evaluate on the test set
+
+The confusion matrix counts, for each true digit (rows), how often each digit
+was predicted (columns). The images below are the first twelve test
+mistakes."""
+        ),
+        code(image_evaluation_code()),
+        code(IMAGE_RECORD, "remove-cell"),
+        md(
+            """## What the results show
+
+The convolutional network misclassifies roughly one test digit in a hundred,
+fewer than half the errors of the dense network in the
+[Neural Networks](../../neural-networks/index.md) chapter after the same
+number of epochs. Weight sharing is the reason: a filter that
+detects a stroke in one corner detects it everywhere. Many of the remaining
+mistakes are digits a person would also hesitate over."""
+        ),
     ]
-    cells.extend(
-        [
-            md("## Define the model"),
-            code(image_model_code(framework, architecture)),
-            md("## Train with validation evidence"),
-            code(IMAGE_KERAS_TRAIN if framework == "keras" else IMAGE_TORCH_TRAIN),
-            md("## Evaluate once on the test set"),
-            code(image_evaluation_code(framework)),
-        ]
+
+
+def cifar_progression_cells(framework: str) -> list[nbformat.NotebookNode]:
+    capture = (
+        "{name}_model, {name}_history = model, history\n"
+        "{name}_validation = max(history['val_accuracy'])"
     )
-    return cells
+    return [
+        md(
+            f"""
+# CIFAR-10 CNN Progression: {framework_name(framework)}
+
+CIFAR-10 holds 60,000 colour images of 32×32 pixels in ten classes. Objects
+vary in pose, scale, and background, which makes the task much harder than
+MNIST. This notebook trains two networks on the same split: a small network
+for 5 epochs and a deeper one with more regularization for 25 epochs. The
+better of the two on validation accuracy is then evaluated once on the test
+set.
+"""
+        ),
+        md(SETUP_TEXT),
+        code(IMAGE_KERAS_IMPORTS if framework == "keras" else IMAGE_TORCH_IMPORTS, "hide-input"),
+        md(CIFAR_SPLIT_TEXT),
+        code(image_data_code(framework, "cifar10", 5, 64)),
+        md(LOOK_TEXT),
+        code(IMAGE_DISTRIBUTION),
+        md(training_text(framework)),
+        code(training_helpers(framework)),
+        md(
+            """## Small network, 5 epochs
+
+Two convolution layers, the second with stride 2 to halve the resolution,
+each followed by batch normalization and a leaky ReLU. Batch normalization
+rescales each layer's outputs with batch statistics, which stabilizes and
+speeds up training. One dense layer of 100 units and dropout precede the
+output."""
+        ),
+        code(image_model_code(framework, "cifar_simple")),
+        code(
+            "history = fit(model, EPOCHS)\nplot_history(history, 'Small network')\n"
+            + capture.format(name="small")
+        ),
+        md(
+            """## Deeper network, 25 epochs
+
+Three convolution stages and dense layers of 600 and 150 units, with dropout
+after the convolutions and between the dense layers. The extra capacity lets
+the network learn richer features, but also makes it easier to memorize the
+training images; the gap between training and validation accuracy shows when
+that begins."""
+        ),
+        code("EPOCHS = 25  # Reduce to 1 or 2 for a quicker run."),
+        code(image_model_code(framework, "cifar_advanced")),
+        code(
+            "history = fit(model, EPOCHS)\nplot_history(history, 'Deeper network')\n"
+            + capture.format(name="deeper")
+        ),
+        md(
+            """## Choose on validation accuracy
+
+The choice between the two networks uses the validation set only, so the
+test score of the chosen network remains an unbiased estimate."""
+        ),
+        code(
+            r"""
+if deeper_validation > small_validation:
+    selected_name, model = "deeper network", deeper_model
+else:
+    selected_name, model = "small network", small_model
+fig, ax = plt.subplots(figsize=(7, 3.4))
+ax.plot(np.arange(1, len(small_history["val_accuracy"]) + 1), small_history["val_accuracy"], marker="o", label="small (5 epochs)")
+ax.plot(np.arange(1, len(deeper_history["val_accuracy"]) + 1), deeper_history["val_accuracy"], marker="o", label="deeper (25 epochs)")
+ax.set(title="Validation accuracy", xlabel="Epoch", ylabel="Accuracy")
+ax.legend()
+ax.grid(alpha=0.25)
+plt.show()
+print(
+    f"best validation accuracy: small {small_validation:.4f}, deeper {deeper_validation:.4f}; "
+    f"selected: {selected_name}"
+)
+"""
+        ),
+        md(
+            """## Evaluate the chosen network on the test set
+
+The confusion matrix shows which classes are mistaken for which."""
+        ),
+        code(image_evaluation_code()),
+        code(IMAGE_RECORD, "remove-cell"),
+        md(
+            """## What the results show
+
+The deeper network wins on validation accuracy. Its training accuracy keeps
+rising long after validation accuracy has levelled off, the signature of
+overfitting, so restoring the best validation epoch matters more here than it
+did for MNIST. Errors are not spread evenly: the animal classes, cats in
+particular, are confused with one another far more often than the vehicle
+classes. Data
+augmentation (random flips and crops of the training images) is the usual
+next step for closing the gap."""
+        ),
+    ]
 
 
 def generate_image_modules() -> None:
-    modules = [
-        {
-            "directory": ROOT
-            / "general-ml"
-            / "foundations"
-            / "convolutional-neural-networks",
-            "module_id": "convolutional-neural-networks",
-            "title": "MNIST Convolutional Neural Network",
-            "chapter": "Convolutional Neural Networks",
-            "dataset": "mnist",
-            "epochs": {"demo": 5},
-            "batch_size": 256,
-            "architectures": {
-                "demo": "mnist",
-            },
-        },
-        {
-            "directory": ROOT
-            / "general-ml"
-            / "advanced"
-            / "cifar10-cnn-progression",
-            "module_id": "cifar10-cnn-progression",
-            "title": "CIFAR-10 CNN Progression",
-            "chapter": "CIFAR-10 CNN Progression",
-            "dataset": "cifar10",
-            "epochs": {"demo": 5},
-            "batch_size": 64,
-            "architectures": {
-                "demo": "cifar_simple",
-            },
-        },
-    ]
-    for settings in modules:
+    modules = (
+        ("convolutional-neural-networks", ROOT / "general-ml" / "foundations" / "convolutional-neural-networks",
+         "Convolutional Network for MNIST", mnist_cnn_cells),
+        ("cifar10-cnn-progression", ROOT / "general-ml" / "advanced" / "cifar10-cnn-progression",
+         "CIFAR-10 CNN Progression", cifar_progression_cells),
+    )
+    for module_id, directory, title, builder in modules:
         for framework in ("pytorch", "keras"):
-            artifacts = ("demo",)
-            for artifact in artifacts:
-                notebook = make_notebook(
-                    title=f"{settings['title']} — {artifact.title()} ({'Keras on Torch' if framework == 'keras' else 'Native PyTorch'})",
-                    module_id=str(settings["module_id"]),
-                    framework=framework,
-                    artifact=artifact,
-                    datasets=[],
-                    cells=paired_image_cells(
-                        title=str(settings["title"]),
-                        chapter=str(settings["chapter"]),
-                        framework=framework,
-                        artifact=artifact,
-                        dataset=str(settings["dataset"]),
-                        architecture=settings["architectures"][artifact],
-                        epochs=settings["epochs"][artifact],
-                        batch_size=int(settings["batch_size"]),
-                    ),
-                )
-                write_notebook(settings["directory"] / framework, f"{artifact}.ipynb", notebook)
+            notebook = make_notebook(
+                title=f"{title}: {framework_name(framework)}",
+                module_id=module_id,
+                framework=framework,
+                artifact="demo",
+                datasets=[],
+                cells=builder(framework),
+            )
+            write_notebook(directory / framework, "demo.ipynb", notebook)
 
 
 def tree_cells(artifact: str) -> list[nbformat.NotebookNode]:
     depth = 6
-    role = "complete workflow"
     return [
         md(
-            f"""
+            """
 # MNIST with XGBoost
 
-This {role} provides the framework-neutral tree-model comparison from
-[Tree Models and Ensembles](index.md). It uses the same seed-42 split and
-classification evidence as the neural examples.
-
-In Colab, run all cells; the first import cell installs XGBoost only if it is
-missing. Reduce `ROUNDS` below if you want a quicker run.
+Gradient-boosted trees are the method of choice for many tabular problems.
+Each tree splits the data on thresholds of individual features; boosting adds
+trees one at a time, each fitted to the errors of the ensemble so far. Here
+each 28×28 image is flattened to 784 pixel features, which throws away the
+spatial layout a convolutional network exploits. The comparison shows what
+that costs. See [Tree Models and Ensembles](index.md) for the chapter
+overview.
 """
         ),
-        md("## Imports and shared split"),
+        md(
+            """## Setup and data
+
+The MNIST files are downloaded once and verified. The split is the same as
+in the neural-network notebooks: 50,000 training, 10,000 validation, and
+10,000 test images."""
+        ),
         code(
             r"""
 import hashlib
@@ -1380,6 +1539,7 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 
 SEED = 42
+CLASS_NAMES = [str(digit) for digit in range(10)]
 raw_root = Path(
     os.getenv("HELIO_DATA_DIR", Path.home() / ".cache" / "helio-data-methods" / "torchvision")
 ) / "MNIST" / "raw"
@@ -1437,6 +1597,7 @@ train_indices, validation_indices = train_test_split(
 split_signature = hashlib.sha256(
     validation_indices.astype("<i8").tobytes()
 ).hexdigest()[:16]
+# Flatten each image into 784 pixel features scaled to 0-1.
 x_train = x_development[train_indices].reshape(len(train_indices), -1).astype("float32") / 255
 y_train = y_development[train_indices]
 x_validation = (
@@ -1444,12 +1605,21 @@ x_validation = (
 )
 y_validation = y_development[validation_indices]
 x_test = x_test.reshape(len(x_test), -1).astype("float32") / 255
-print(f"XGBoost {xgb.__version__}; split signature: {split_signature}")
-"""
+print(f"XGBoost {xgb.__version__}; train={len(y_train):,}, validation={len(y_validation):,}, test={len(y_test):,}")
+""",
+            "hide-input",
         ),
-        md("## Inspect the training distribution"),
+        md(LOOK_TEXT),
         code(IMAGE_DISTRIBUTION),
-        md("## Train with validation-only early stopping"),
+        md(
+            """## Train with early stopping
+
+Each boosting round adds one tree per class. `eta` shrinks each tree's
+contribution, `max_depth` limits how many splits a tree may make, and
+`subsample` and `colsample_bytree` fit each tree on a random 80% of the
+images and pixels. `alpha` and `lambda` penalize large leaf weights.
+Training stops once the validation error has not improved for 10 rounds."""
+        ),
         code(
             f"""
 parameters = {{
@@ -1465,284 +1635,328 @@ parameters = {{
     "seed": SEED,
     "nthread": 2,
 }}
-ROUNDS = 100  # Reduce to 10 or 25 for a quicker run.
+ROUNDS = 300  # Reduce to 25 or 50 for a quicker run.
 dtrain = xgb.DMatrix(x_train, label=y_train)
 dvalidation = xgb.DMatrix(x_validation, label=y_validation)
+evaluation_log = {{}}
 model = xgb.train(
     parameters,
     dtrain,
     num_boost_round=ROUNDS,
     evals=[(dtrain, "training"), (dvalidation, "validation")],
     early_stopping_rounds=10,
-    verbose_eval=10,
+    evals_result=evaluation_log,
+    verbose_eval=50,
 )
+print(f"best round: {{model.best_iteration + 1}} of {{ROUNDS}}")
+
+fig, ax = plt.subplots(figsize=(7, 3.4))
+for name, log in evaluation_log.items():
+    ax.plot(np.arange(1, len(log["merror"]) + 1), log["merror"], label=name)
+ax.set(title="Classification error during boosting", xlabel="Boosting round", ylabel="Error", yscale="log")
+ax.legend()
+ax.grid(alpha=0.25)
+plt.show()
 """
         ),
-        md("## Final test evidence"),
+        md(
+            """## Evaluate on the test set
+
+Predictions use the trees up to the best validation round."""
+        ),
         code(
             r"""
-probabilities = model.predict(xgb.DMatrix(x_test))
+probabilities = model.predict(
+    xgb.DMatrix(x_test), iteration_range=(0, model.best_iteration + 1)
+)
 test_predictions = probabilities.argmax(axis=1)
 test_accuracy = accuracy_score(y_test, test_predictions)
 cm = confusion_matrix(y_test, test_predictions, labels=np.arange(10))
 print(f"test accuracy: {test_accuracy:.4f}")
 print(classification_report(y_test, test_predictions, digits=3, zero_division=0))
-print(
-    "HELIO_RESULT "
-    + json.dumps(
-        {
-            "split_signature": split_signature,
-            "test_accuracy": float(test_accuracy),
-            "confusion_shape": list(cm.shape),
-        },
-        sort_keys=True,
-    )
-)
-assert cm.shape == (10, 10)
 fig, ax = plt.subplots(figsize=(7, 6))
 ConfusionMatrixDisplay(cm).plot(ax=ax, colorbar=False, values_format="d")
-ax.set_title("XGBoost test confusion matrix")
+ax.set_title("Test confusion matrix (rows: true digit)")
 plt.show()
 """
+        ),
+        code(IMAGE_RECORD, "remove-cell"),
+        md(
+            """## What the results show
+
+Boosted trees classify flattened pixels well, but they make several times as
+many errors as the convolutional network on the same split. A tree that splits on pixel
+412 learns nothing about pixel 413, so every stroke position has to be
+learned separately. On tabular data, where features have no spatial
+arrangement, the comparison usually goes the other way."""
         ),
     ]
 
 
 def generate_tree_module() -> None:
     directory = ROOT / "general-ml" / "advanced" / "tree-models"
-    for artifact in ("demo",):
-        notebook = make_notebook(
-            title=f"MNIST XGBoost — {artifact.title()}",
-            module_id="tree-models",
-            framework="framework-neutral",
-            artifact=artifact,
-            datasets=[],
-            library="xgboost",
-            implementation_role="primary",
-            cells=tree_cells(artifact),
-        )
-        write_notebook(directory / "xgboost", f"{artifact}.ipynb", notebook)
-
-
-def transfer_cells(framework: str, artifact: str) -> list[nbformat.NotebookNode]:
-    role = "complete workflow"
-    keras_head = (
-        "layers.Dense(512, activation='relu'), layers.Dropout(0.25), "
-        "layers.Dense(256, activation='relu'), layers.Dropout(0.25),"
+    notebook = make_notebook(
+        title="MNIST with XGBoost",
+        module_id="tree-models",
+        framework="framework-neutral",
+        artifact="demo",
+        datasets=[],
+        library="xgboost",
+        implementation_role="primary",
+        cells=tree_cells("demo"),
     )
-    torch_head = (
-        "nn.Linear(512, 512), nn.ReLU(), nn.Dropout(0.25), "
-        "nn.Linear(512, 256), nn.ReLU(), nn.Dropout(0.25),"
-    )
-    cells = [
-        md(
-            f"""
-# CIFAR-10 Transfer Learning with {"Keras 3" if framework == "keras" else "PyTorch"}
+    write_notebook(directory / "xgboost", "demo.ipynb", notebook)
 
-This {role} freezes an ImageNet-pretrained VGG16 feature extractor and trains a
-CIFAR-10 classifier. The split, head intent, ten-epoch maximum, and evaluation
-are aligned across frameworks.
 
-A network connection is required the first time the pretrained weights are
-cached. To run the example more quickly, set `EPOCHS` to 1 or 2 in the data cell.
-"""
-        ),
-        md("## Imports and shared CIFAR-10 split"),
-        code(IMAGE_KERAS_IMPORTS if framework == "keras" else IMAGE_TORCH_IMPORTS),
-        code(image_data_code(framework, "cifar10", 10, 256)),
-        md("## Inspect class coverage"),
-        code(IMAGE_DISTRIBUTION),
-    ]
-    if framework == "keras":
-        cells.extend(
-            [
-                md("## Preprocess for VGG16 and define the trainable head"),
-                code(
-                    f"""
-x_train = keras.applications.vgg16.preprocess_input(x_train * 255.0)
-x_validation = keras.applications.vgg16.preprocess_input(x_validation * 255.0)
-x_test_images = x_test.copy()
-x_test = keras.applications.vgg16.preprocess_input(x_test * 255.0)
-base_model = keras.applications.VGG16(
-    include_top=False, weights="imagenet", input_shape=(32, 32, 3)
-)
-base_model.trainable = False
-print("extracting frozen VGG16 features once per split")
-x_train = base_model.predict(
-    x_train, batch_size=BATCH_SIZE, verbose=1
-).reshape(len(x_train), -1)
-x_validation = base_model.predict(
-    x_validation, batch_size=BATCH_SIZE, verbose=1
-).reshape(len(x_validation), -1)
-x_test = base_model.predict(
-    x_test, batch_size=BATCH_SIZE, verbose=1
-).reshape(len(x_test), -1)
-model = keras.Sequential(
-    [
-        keras.Input(shape=(x_train.shape[1],)),
-        {keras_head}
-        layers.Dense(10),
-    ],
-    name="vgg16_frozen_features",
-)
-model.compile(
-    optimizer=keras.optimizers.Adam(1e-3),
-    loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
-    metrics=["accuracy"],
-)
-print(f"trainable parameters: {{sum(np.prod(v.shape) for v in model.trainable_weights):,}}")
-model.summary()
-"""
-                ),
-                md("## Train with validation-based early stopping"),
-                code(
-                    r"""
-history = model.fit(
-    x_train,
-    y_train,
-    validation_data=(x_validation, y_validation),
-    epochs=EPOCHS,
-    batch_size=BATCH_SIZE,
-    callbacks=[
-        keras.callbacks.EarlyStopping(
-            monitor="val_loss", patience=2, restore_best_weights=True
-        )
-    ],
-    verbose=2,
-)
-fig, axes = plt.subplots(1, 2, figsize=(10, 3.5))
-axes[0].plot(history.history["loss"], label="training")
-axes[0].plot(history.history["val_loss"], label="validation")
-axes[0].set(title="Cross-entropy", xlabel="Epoch")
-axes[1].plot(history.history["accuracy"], label="training")
-axes[1].plot(history.history["val_accuracy"], label="validation")
-axes[1].set(title="Accuracy", xlabel="Epoch")
-for axis in axes:
-    axis.legend()
-plt.tight_layout()
-plt.show()
-"""
-                ),
-                md("## Final test evidence"),
-                code(
-                    image_evaluation_code("keras").replace(
-                        "image = x_test[index]", "image = x_test_images[index]"
-                    )
-                ),
-            ]
-        )
-    else:
-        cells.extend(
-            [
-                md("## Normalize for VGG16 and define the trainable head"),
-                code(
-                    f"""
+TRANSFER_TORCH_FEATURES = r"""
 from torchvision.models import VGG16_Weights, vgg16
 
-mean = np.asarray([0.485, 0.456, 0.406], dtype=np.float32)[:, None, None]
-std = np.asarray([0.229, 0.224, 0.225], dtype=np.float32)[:, None, None]
-x_train = ((x_train - mean) / std).astype(np.float32)
-x_validation = ((x_validation - mean) / std).astype(np.float32)
-x_test_images = x_test.copy()
-x_test = ((x_test - mean) / std).astype(np.float32)
+IMAGE_SIZE = 64  # VGG16 was trained on 224-pixel images; 32 pixels leaves a 1x1 map.
+HEAD_EPOCHS = 30
+SUBSET_SIZES = [1_000, 5_000, 45_000]
+imagenet_mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+imagenet_std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
 
-
-class TransferClassifier(nn.Module):
-    def __init__(self):
-        super().__init__()
-        source = vgg16(weights=VGG16_Weights.DEFAULT)
-        self.features = source.features
-        for parameter in self.features.parameters():
-            parameter.requires_grad = False
-        self.pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.eval()
-
-    def forward(self, values):
-        return torch.flatten(self.pool(self.features(values)), 1)
-
-
-feature_extractor = TransferClassifier().to(DEVICE)
+backbone = vgg16(weights=VGG16_Weights.DEFAULT).features.to(DEVICE).eval()
+for parameter in backbone.parameters():
+    parameter.requires_grad = False  # Freeze the pretrained filters.
 
 
 def extract_features(images):
-    loader = DataLoader(
-        TensorDataset(torch.from_numpy(images)),
-        batch_size=BATCH_SIZE,
-        shuffle=False,
-    )
-    batches = []
+    # Resize, normalize with ImageNet statistics, and average-pool VGG16's last maps.
+    outputs = []
     with torch.no_grad():
-        for (batch,) in loader:
-            batches.append(feature_extractor(batch.to(DEVICE)).cpu().numpy())
-    return np.concatenate(batches).astype(np.float32)
+        for start in range(0, len(images), 256):
+            batch = torch.from_numpy(images[start : start + 256])
+            batch = nn.functional.interpolate(batch, size=IMAGE_SIZE, mode="bilinear")
+            batch = ((batch - imagenet_mean) / imagenet_std).to(DEVICE)
+            outputs.append(backbone(batch).mean(dim=(2, 3)).cpu().numpy())
+    return np.concatenate(outputs).astype(np.float32)
 
 
-print("extracting frozen VGG16 features once per split")
-x_train = extract_features(x_train)
-x_validation = extract_features(x_validation)
-x_test = extract_features(x_test)
-model = nn.Sequential(
-    {torch_head}
-    nn.Linear(256, 10),
-)
+started = time.perf_counter()
+features_train = extract_features(x_train)
+features_validation = extract_features(x_validation)
+features_test = extract_features(x_test)
 print(
-    "trainable parameters:",
-    f"{{sum(value.numel() for value in model.parameters() if value.requires_grad):,}}",
+    f"feature vectors: {features_train.shape[1]} per image; "
+    f"extraction took {time.perf_counter() - started:.0f} s"
 )
+
+
+def make_head():
+    # The only trainable part of the transfer model.
+    return nn.Sequential(
+        nn.Linear(512, 256), nn.ReLU(), nn.Dropout(0.25), nn.Linear(256, 10)
+    )
 """
-                ),
-                md("## Train under the shared budget"),
-                code(IMAGE_TORCH_TRAIN.replace(
-                    "optimizer = torch.optim.Adam(model.parameters())",
-                    (
-                        "optimizer = torch.optim.Adam(\n"
-                        "    (value for value in model.parameters() if value.requires_grad),\n"
-                        "    lr=0.001,\n"
-                        ")"
-                    ),
-                )),
-                md("## Final test evidence"),
-                code(
-                    image_evaluation_code("pytorch").replace(
-                        "image = x_test[index]", "image = x_test_images[index]"
-                    )
-                ),
-            ]
+
+TRANSFER_KERAS_FEATURES = r"""
+IMAGE_SIZE = 64  # VGG16 was trained on 224-pixel images; 32 pixels leaves a 1x1 map.
+HEAD_EPOCHS = 30
+SUBSET_SIZES = [1_000, 5_000, 45_000]
+backbone = keras.applications.VGG16(
+    include_top=False, weights="imagenet", input_shape=(IMAGE_SIZE, IMAGE_SIZE, 3),
+    pooling="avg",
+)
+backbone.trainable = False  # Freeze the pretrained filters.
+
+
+def extract_features(images):
+    # Resize, apply VGG16's own preprocessing, and average-pool its last maps.
+    outputs = []
+    for start in range(0, len(images), 256):
+        batch = keras.ops.image.resize(images[start : start + 256] * 255.0, (IMAGE_SIZE, IMAGE_SIZE))
+        batch = keras.applications.vgg16.preprocess_input(batch)
+        outputs.append(keras.ops.convert_to_numpy(backbone(batch, training=False)))
+    return np.concatenate(outputs).astype(np.float32)
+
+
+started = time.perf_counter()
+features_train = extract_features(x_train)
+features_validation = extract_features(x_validation)
+features_test = extract_features(x_test)
+print(
+    f"feature vectors: {features_train.shape[1]} per image; "
+    f"extraction took {time.perf_counter() - started:.0f} s"
+)
+
+
+def make_head():
+    # The only trainable part of the transfer model.
+    return keras.Sequential(
+        [
+            keras.Input(shape=(512,)),
+            layers.Dense(256, activation="relu"),
+            layers.Dropout(0.25),
+            layers.Dense(10),
+        ]
+    )
+"""
+
+TRANSFER_COMPARISON = r"""
+rows, heads = [], {}
+for size in SUBSET_SIZES:
+    subset = np.arange(min(size, len(y_train)))  # The training order is already shuffled.
+    head = make_head()
+    head_history = fit(
+        head, HEAD_EPOCHS,
+        train=(features_train[subset], y_train[subset]),
+        validation=(features_validation, y_validation),
+        verbose=False,
+    )
+    scratch = make_scratch_network()
+    scratch_history = fit(
+        scratch, EPOCHS, train=(x_train[subset], y_train[subset]), verbose=False
+    )
+    heads[size] = head
+    rows.append(
+        {
+            "training images": size,
+            "frozen VGG16 + head": max(head_history["val_accuracy"]),
+            "small CNN from scratch": max(scratch_history["val_accuracy"]),
+        }
+    )
+    print(f"{size:>6,} images: transfer {rows[-1]['frozen VGG16 + head']:.3f}, "
+          f"scratch {rows[-1]['small CNN from scratch']:.3f}")
+
+comparison = pd.DataFrame(rows).set_index("training images")
+display(comparison.round(3))
+fig, ax = plt.subplots(figsize=(6, 3.8))
+for column in comparison:
+    ax.plot(comparison.index, comparison[column], marker="o", label=column)
+ax.set(
+    xscale="log", xlabel="Labelled training images", ylabel="Best validation accuracy",
+    title="Transfer learning pays most when labels are scarce",
+)
+ax.legend()
+ax.grid(alpha=0.25)
+plt.show()
+"""
+
+
+def transfer_cells(framework: str, artifact: str) -> list[nbformat.NotebookNode]:
+    imports = (IMAGE_KERAS_IMPORTS if framework == "keras" else IMAGE_TORCH_IMPORTS) + (
+        "import time\n\nimport pandas as pd\n"
+    )
+    scratch = image_model_code(framework, "cifar_simple").replace(
+        "model = SmallNetwork()", "def make_scratch_network():\n    return SmallNetwork()\n\n\nmodel = SmallNetwork()"
+    ) if framework == "pytorch" else (
+        "def make_scratch_network():\n"
+        + "\n".join(
+            "    " + line if line else line
+            for line in image_model_code(framework, "cifar_simple")
+            .replace("model = keras.Sequential(", "return keras.Sequential(")
+            .replace("model.summary()", "")
+            .strip()
+            .splitlines()
         )
-    return cells
+        + "\n"
+    )
+    return [
+        md(
+            f"""
+# CIFAR-10 Transfer Learning: {framework_name(framework)}
+
+Transfer learning reuses a network trained on one large dataset as a feature
+extractor for a new task. Here the convolutional part of VGG16, trained on 1.3
+million ImageNet photographs, is frozen, and only a small classifier on top
+of it is trained. The benefit should be largest when labelled examples are
+scarce, which is the usual situation for rare heliophysical events. We
+therefore train on 1,000, 5,000, and 45,000 CIFAR-10 images and compare with
+the small CNN of the [CIFAR-10 progression](../../cifar10-cnn-progression/index.md)
+trained from scratch on the same images.
+
+The pretrained weights (about 500 MB) are downloaded on first use. Feature
+extraction takes several minutes on a CPU.
+"""
+        ),
+        md(SETUP_TEXT),
+        code(imports, "hide-input"),
+        md(CIFAR_SPLIT_TEXT),
+        code(image_data_code(framework, "cifar10", 10, 256)),
+        md(LOOK_TEXT),
+        code(IMAGE_DISTRIBUTION),
+        md(training_text(framework)),
+        code(training_helpers(framework)),
+        md(
+            """## Extract frozen VGG16 features
+
+Each image is enlarged to 64×64 pixels, normalized as VGG16 expects, and
+passed once through the frozen convolutional layers. Averaging the last
+feature maps gives a 512-number summary per image. Only the small head
+defined here is trained."""
+        ),
+        code(TRANSFER_KERAS_FEATURES if framework == "keras" else TRANSFER_TORCH_FEATURES),
+        md(
+            """## The comparison network
+
+The same small CNN as in the CIFAR-10 progression, trained from raw pixels
+for 10 epochs."""
+        ),
+        code(scratch),
+        md(
+            """## Train both on growing subsets
+
+For each subset size, both models see the same training images and are
+scored on the full validation set. The test set is not used here."""
+        ),
+        code(TRANSFER_COMPARISON),
+        md(
+            """## Evaluate the transfer model on the test set
+
+The head trained on all 45,000 images is evaluated once."""
+        ),
+        code(
+            "model = heads[SUBSET_SIZES[-1]]\n"
+            + image_evaluation_code(images="x_test", inputs="features_test")
+        ),
+        code(IMAGE_RECORD, "remove-cell"),
+        md(
+            """## What the results show
+
+The experiment tests a specific prediction. With 1,000 labelled images, the
+frozen ImageNet features should give a better classifier than a network that
+must learn its filters from those images alone. As the training set grows,
+the network trained from scratch should close the gap, because it can learn
+features matched to small CIFAR images instead of reusing features learned
+on large photographs. Check the table against both statements. If the gap
+persists at 45,000 images, fine-tuning the last VGG16 block instead of
+keeping all of it frozen is the natural next step."""
+        ),
+    ]
 
 
 def generate_transfer_module() -> None:
     directory = ROOT / "general-ml" / "advanced" / "transfer-learning"
     for framework in ("pytorch", "keras"):
-        artifacts = ("demo",)
-        for artifact in artifacts:
-            notebook = make_notebook(
-                title=f"CIFAR-10 Transfer Learning — {artifact.title()} ({'Keras on Torch' if framework == 'keras' else 'Native PyTorch'})",
-                module_id="transfer-learning",
-                framework=framework,
-                artifact=artifact,
-                datasets=[],
-                cells=transfer_cells(framework, artifact),
-            )
-            write_notebook(directory / framework, f"{artifact}.ipynb", notebook)
+        notebook = make_notebook(
+            title=f"CIFAR-10 Transfer Learning: {framework_name(framework)}",
+            module_id="transfer-learning",
+            framework=framework,
+            artifact="demo",
+            datasets=[],
+            cells=transfer_cells(framework, "demo"),
+        )
+        write_notebook(directory / framework, "demo.ipynb", notebook)
 
 
 def tuning_cells(framework: str, artifact: str) -> list[nbformat.NotebookNode]:
-    role = "complete workflow"
+    library = "KerasTuner" if framework == "keras" else "Optuna"
     cells = [
         md(
             f"""
-# MNIST CNN Tuning with {"KerasTuner" if framework == "keras" else "Optuna and PyTorch"}
+# Hyperparameter Tuning with {library}: {framework_name(framework)}
 
-This {role} treats tuning as a validation experiment. Both frameworks use the
-same seed-42 split, discrete search space, four-trial budget, ten-epoch maximum,
-and validation accuracy objective.
-
-To run the search more quickly, reduce `TRIALS` or `SEARCH_EPOCHS` below.
+Hyperparameters are the choices made before training: here the number of
+filters in each convolution layer, the width of the dense layer, and the
+learning rate. A tuner trains one model per configuration and keeps the
+configuration with the best validation accuracy. The test set plays no part
+in the search; it scores the selected configuration once at the end. Reduce
+`TRIALS` or `SEARCH_EPOCHS` for a quicker run.
 """
         ),
-        md("## Imports and shared split"),
+        md(SETUP_TEXT),
         code(
             (
                 IMAGE_KERAS_IMPORTS
@@ -1751,6 +1965,9 @@ import importlib.util
 import subprocess
 import sys
 from pathlib import Path
+
+import pandas as pd
+
 if importlib.util.find_spec("keras_tuner") is None:
     subprocess.check_call(
         [sys.executable, "-m", "pip", "install", "-q", "keras-tuner>=1.4,<2"]
@@ -1766,6 +1983,9 @@ import importlib.util
 import subprocess
 import sys
 import warnings
+
+import pandas as pd
+
 if importlib.util.find_spec("optuna") is None:
     subprocess.check_call(
         [sys.executable, "-m", "pip", "install", "-q", "optuna>=4,<5"]
@@ -1774,13 +1994,23 @@ warnings.filterwarnings("ignore", message="IProgress not found.*")
 import optuna
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 """
-            )
+            ),
+            "hide-input",
         ),
-        code(image_data_code(framework, "mnist", 5, 128)),
-        md("## Fixed search contract"),
+        md(MNIST_SPLIT_TEXT),
+        code(image_data_code(framework, "mnist", None, 128)),
+        md(training_text(framework)),
+        code(training_helpers(framework)),
+        md(
+            f"""## The search space
+
+Every combination of the choices below defines one candidate model, 24 in
+all. The budget allows `TRIALS` of them, each trained for up to
+`SEARCH_EPOCHS` epochs and scored by its best validation accuracy.
+{"KerasTuner's random search draws configurations uniformly." if framework == "keras" else "Optuna's TPE sampler proposes configurations that resemble the best so far; with only four trials it behaves much like a random search."}"""
+        ),
         code(
-            IMAGE_DISTRIBUTION
-            + r"""
+            r"""
 TRIALS = 4  # Reduce to 2 for a quicker search.
 SEARCH_EPOCHS = 10  # Reduce to 1 or 2 for quicker trials.
 SEARCH_SPACE = {
@@ -1795,11 +2025,11 @@ SEARCH_SPACE = {
     if framework == "keras":
         cells.extend(
             [
-                md("## Run KerasTuner"),
+                md(f"## Run the search with {library}"),
                 code(
                     r"""
 def build_model(hp):
-    model = keras.Sequential(
+    return keras.Sequential(
         [
             keras.Input(shape=(28, 28, 1)),
             layers.Conv2D(hp.Choice("filters_1", SEARCH_SPACE["filters_1"]), 3, activation="relu"),
@@ -1813,18 +2043,21 @@ def build_model(hp):
             layers.Dense(10),
         ]
     )
-    model.compile(
-        optimizer=keras.optimizers.Adam(
-            hp.Choice("learning_rate", SEARCH_SPACE["learning_rate"])
-        ),
-        loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
-        metrics=["accuracy"],
-    )
-    return model
+
+
+class CompiledHyperModel(kt.HyperModel):
+    def build(self, hp):
+        model = build_model(hp)
+        model.compile(
+            optimizer=keras.optimizers.Adam(hp.Choice("learning_rate", SEARCH_SPACE["learning_rate"])),
+            loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+            metrics=["accuracy"],
+        )
+        return model
 
 
 tuner = kt.RandomSearch(
-    build_model,
+    CompiledHyperModel(),
     objective="val_accuracy",
     max_trials=TRIALS,
     seed=SEED,
@@ -1838,34 +2071,39 @@ tuner.search(
     validation_data=(x_validation, y_validation),
     epochs=SEARCH_EPOCHS,
     batch_size=BATCH_SIZE,
-    callbacks=[keras.callbacks.EarlyStopping("val_loss", patience=2)],
     verbose=0,
 )
+trials = pd.DataFrame(
+    [
+        {**trial.hyperparameters.values, "best validation accuracy": trial.score}
+        for trial in tuner.oracle.get_best_trials(TRIALS)
+    ]
+)
+display(trials.round(4))
 best_parameters = tuner.get_best_hyperparameters(1)[0]
-print("best parameters:", best_parameters.values)
 """
                 ),
-                md("## Rebuild the selected model and evaluate once"),
+                md(
+                    """## Retrain the selected configuration and evaluate once
+
+The selected configuration is retrained from scratch with the same epoch
+budget, the best validation epoch is restored, and the model is scored on the
+test set."""
+                ),
                 code(
                     r"""
-model = tuner.hypermodel.build(best_parameters)
-history = model.fit(
-    x_train,
-    y_train,
-    validation_data=(x_validation, y_validation),
-    epochs=EPOCHS,
-    batch_size=BATCH_SIZE,
-    verbose=2,
-)
+keras.utils.set_random_seed(SEED)
+model = build_model(best_parameters)
+history = fit(model, SEARCH_EPOCHS, learning_rate=best_parameters.get("learning_rate"))
+plot_history(history)
 """
                 ),
-                code(image_evaluation_code("keras")),
             ]
         )
     else:
         cells.extend(
             [
-                md("## Run Optuna"),
+                md(f"## Run the search with {library}"),
                 code(
                     r"""
 def build_trial_model(trial):
@@ -1880,116 +2118,149 @@ def build_trial_model(trial):
     )
 
 
-train_dataset = TensorDataset(torch.from_numpy(x_train), torch.from_numpy(y_train).long())
-validation_features = torch.from_numpy(x_validation)
-validation_targets = torch.from_numpy(y_validation).long()
-
-
 def objective(trial):
     torch.manual_seed(SEED + trial.number)
-    candidate = build_trial_model(trial)
-    learning_rate = trial.suggest_categorical(
-        "learning_rate", SEARCH_SPACE["learning_rate"]
-    )
-    candidate_optimizer = torch.optim.Adam(candidate.parameters(), lr=learning_rate)
-    criterion = nn.CrossEntropyLoss()
-    loader = DataLoader(
-        train_dataset,
-        batch_size=BATCH_SIZE,
-        shuffle=True,
-        generator=torch.Generator().manual_seed(SEED + trial.number),
-    )
-    best_accuracy = 0.0
-    for epoch in range(SEARCH_EPOCHS):
-        candidate.train()
-        for features, target in loader:
-            candidate_optimizer.zero_grad()
-            loss = criterion(candidate(features), target)
-            loss.backward()
-            candidate_optimizer.step()
-        candidate.eval()
-        with torch.no_grad():
-            accuracy = (
-                candidate(validation_features).argmax(1) == validation_targets
-            ).float().mean().item()
-        best_accuracy = max(best_accuracy, accuracy)
-        trial.report(accuracy, epoch)
-    return best_accuracy
+    model = build_trial_model(trial)
+    learning_rate = trial.suggest_categorical("learning_rate", SEARCH_SPACE["learning_rate"])
+    history = fit(model, SEARCH_EPOCHS, learning_rate=learning_rate, verbose=False)
+    return max(history["val_accuracy"])
 
 
 study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=SEED))
 study.optimize(objective, n_trials=TRIALS)
-print("best parameters:", study.best_params)
+trials = study.trials_dataframe(attrs=("number", "params", "value"))
+trials.columns = [column.removeprefix("params_") for column in trials.columns]
+display(trials.rename(columns={"value": "best validation accuracy"}).round(4))
 """
                 ),
-                md("## Rebuild the selected model and evaluate once"),
+                md(
+                    """## Retrain the selected configuration and evaluate once
+
+The selected configuration is retrained from scratch with the same epoch
+budget, the best validation epoch is restored, and the model is scored on the
+test set. `optuna.trial.FixedTrial` replays the chosen values through the
+same model-building function."""
+                ),
                 code(
                     r"""
-class FixedTrial:
-    def suggest_categorical(self, name, values):
-        return study.best_params[name]
-
-
-model = build_trial_model(FixedTrial())
+torch.manual_seed(SEED)
+model = build_trial_model(optuna.trial.FixedTrial(study.best_params))
+history = fit(model, SEARCH_EPOCHS, learning_rate=study.best_params["learning_rate"])
+plot_history(history)
 """
                 ),
-                code(
-                    IMAGE_TORCH_TRAIN.replace(
-                        "optimizer = torch.optim.Adam(model.parameters())",
-                        'optimizer = torch.optim.Adam(model.parameters(), lr=study.best_params["learning_rate"])',
-                    )
-                ),
-                code(image_evaluation_code("pytorch")),
             ]
         )
+    cells.extend(
+        [
+            md(
+                """## Evaluate on the test set
+
+The first twelve test mistakes follow the confusion matrix."""
+            ),
+            code(AS_IMAGE + "\n\n" + image_evaluation_code()),
+            code(IMAGE_RECORD, "remove-cell"),
+            md(
+                """## What the results show
+
+On MNIST the configurations differ by fractions of a percent once the
+learning rate is reasonable, so the search mainly rules out the learning
+rates that are too high or too low. With four trials the ranking of the
+remaining configurations is not reliable: the differences are comparable to
+the change caused by a new random seed. A larger budget, or repeated trials
+per configuration, is needed before a small difference means anything."""
+            ),
+        ]
+    )
     return cells
 
 
 def generate_tuning_module() -> None:
     directory = ROOT / "general-ml" / "advanced" / "hyperparameter-tuning"
     for framework in ("pytorch", "keras"):
-        artifacts = ("demo",)
-        for artifact in artifacts:
-            notebook = make_notebook(
-                title=f"MNIST CNN Tuning — {artifact.title()} ({'KerasTuner on Torch' if framework == 'keras' else 'Optuna and PyTorch'})",
-                module_id="hyperparameter-tuning",
-                framework=framework,
-                artifact=artifact,
-                datasets=[],
-                cells=tuning_cells(framework, artifact),
-            )
-            write_notebook(directory / framework, f"{artifact}.ipynb", notebook)
+        library = "KerasTuner" if framework == "keras" else "Optuna"
+        notebook = make_notebook(
+            title=f"Hyperparameter Tuning with {library}: {framework_name(framework)}",
+            module_id="hyperparameter-tuning",
+            framework=framework,
+            artifact="demo",
+            datasets=[],
+            cells=tuning_cells(framework, "demo"),
+        )
+        write_notebook(directory / framework, "demo.ipynb", notebook)
+
+
+GAN_KERAS_IMPORTS = r"""
+import json
+import os
+
+os.environ["KERAS_BACKEND"] = "torch"
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")  # Deterministic cuBLAS on GPUs.
+
+import keras
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from keras import layers
+
+assert keras.backend.backend() == "torch"
+print(f"Keras {keras.__version__}, backend {keras.backend.backend()}, PyTorch {torch.__version__}")
+"""
+
+GAN_TORCH_IMPORTS = r"""
+import json
+import os
+import random
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from torch import nn
+from torch.utils.data import DataLoader, TensorDataset
+from torchvision import datasets
+
+print(f"PyTorch {torch.__version__}")
+"""
 
 
 def gan_cells(framework: str, artifact: str) -> list[nbformat.NotebookNode]:
-    role = "complete workflow"
     smoothing = 0.0
     common_opening = [
         md(
             f"""
-# MNIST DCGAN with {"Keras 3 — PyTorch Backend" if framework == "keras" else "Native PyTorch"}
+# Generative Adversarial Network for MNIST: {framework_name(framework)}
 
-This {role} modernizes the archived DCGAN. A fixed 100-dimensional noise panel
-tracks the same generated samples across training. Full execution uses 50
-epochs and batch size 128. Reduce `EPOCHS` to 1 or 2 for a quicker run.
-
-Losses and selected images are diagnostics, not proof that the generator
-learned the complete data distribution.
+A generative adversarial network (GAN) trains two networks against each
+other. The generator turns a vector of 100 random numbers into a 28×28 image;
+the discriminator sees real and generated images and outputs the log-odds
+that its input is real. The generator improves by fooling the discriminator,
+the discriminator by not being fooled. This is the DCGAN design of Radford et
+al. (2016), trained on the 60,000 MNIST training images for 50 epochs with
+batches of 128. Reduce `EPOCHS` for a quicker run.
 """
         ),
-        md("## Imports, data, and fixed seeds"),
+        md(
+            """## Setup and data
+
+Pixel values are scaled to [-1, 1] to match the generator's tanh output. A
+fixed set of 16 noise vectors is kept aside so the same samples can be
+followed through training."""
+        ),
     ]
     if framework == "keras":
-        cells = common_opening + [
+        return common_opening + [
             code(
-                IMAGE_KERAS_IMPORTS
+                GAN_KERAS_IMPORTS
                 + f"""
 SEED = 42
 EPOCHS = 50  # Reduce to 1 or 2 for a quicker run.
 BATCH_SIZE = 128
 LATENT_DIM = 100
 LABEL_SMOOTHING = {smoothing}
+SNAPSHOT_EPOCHS = sorted({{1, max(1, EPOCHS // 10), max(1, EPOCHS // 2), EPOCHS}})
 keras.utils.set_random_seed(SEED)
+torch.use_deterministic_algorithms(True, warn_only=True)
 (x_train, _), _ = keras.datasets.mnist.load_data()
 x_train = (x_train.astype("float32") - 127.5) / 127.5
 x_train = x_train[..., np.newaxis]
@@ -2003,7 +2274,15 @@ dataset = torch.utils.data.DataLoader(
 fixed_noise = keras.random.normal((16, LATENT_DIM), seed=SEED)
 """
             ),
-            md("## Define generator and discriminator"),
+            md(
+                """## Define the generator and discriminator
+
+The generator projects the noise to 7×7×256 and upsamples twice with
+transposed convolutions to 28×28×1. The discriminator mirrors it with two
+strided convolutions and dropout. `AdversarialModel` overrides `train_step`
+so that `fit()` alternates one discriminator update and one generator update
+per batch."""
+            ),
             code(
                 r"""
 generator = keras.Sequential(
@@ -2037,6 +2316,8 @@ discriminator = keras.Sequential(
     ],
     name="discriminator",
 )
+
+
 class AdversarialModel(keras.Model):
     def __init__(self, generator, discriminator, latent_dim, label_smoothing):
         super().__init__()
@@ -2064,11 +2345,9 @@ class AdversarialModel(keras.Model):
             real_images = real_images[0]
         batch_size = real_images.shape[0]
 
-        noise = keras.random.normal(
-            (batch_size, self.latent_dim), seed=self.seed_generator
-        )
+        # Discriminator step: real images are labelled 1, generated images 0.
+        noise = keras.random.normal((batch_size, self.latent_dim), seed=self.seed_generator)
         generated_images = self.generator(noise, training=True)
-
         self.zero_grad()
         real_logits = self.discriminator(real_images, training=True)
         generated_logits = self.discriminator(generated_images.detach(), training=True)
@@ -2078,27 +2357,22 @@ class AdversarialModel(keras.Model):
         )
         discriminator_loss.backward()
         discriminator_weights = list(self.discriminator.trainable_weights)
-        discriminator_gradients = [weight.value.grad for weight in discriminator_weights]
         with torch.no_grad():
             self.discriminator_optimizer.apply(
-                discriminator_gradients, discriminator_weights
+                [weight.value.grad for weight in discriminator_weights], discriminator_weights
             )
 
-        noise = keras.random.normal(
-            (batch_size, self.latent_dim), seed=self.seed_generator
-        )
+        # Generator step: reward generated images that the discriminator calls real.
+        noise = keras.random.normal((batch_size, self.latent_dim), seed=self.seed_generator)
         self.zero_grad()
-        generated_logits = self.discriminator(
-            self.generator(noise, training=True), training=True
-        )
-        generator_loss = self.loss_function(
-            torch.ones_like(generated_logits), generated_logits
-        )
+        generated_logits = self.discriminator(self.generator(noise, training=True), training=True)
+        generator_loss = self.loss_function(torch.ones_like(generated_logits), generated_logits)
         generator_loss.backward()
         generator_weights = list(self.generator.trainable_weights)
-        generator_gradients = [weight.value.grad for weight in generator_weights]
         with torch.no_grad():
-            self.generator_optimizer.apply(generator_gradients, generator_weights)
+            self.generator_optimizer.apply(
+                [weight.value.grad for weight in generator_weights], generator_weights
+            )
 
         self.generator_loss_tracker.update_state(generator_loss)
         self.discriminator_loss_tracker.update_state(discriminator_loss)
@@ -2116,38 +2390,52 @@ gan.compile(
 )
 """
             ),
-            md("## Train adversarially through the high-level fit workflow"),
+            md(
+                """## Train
+
+A callback stores the images generated from the fixed noise at a few epochs,
+so progress can be judged by eye."""
+            ),
             code(
                 r"""
-history = gan.fit(dataset, epochs=EPOCHS, verbose=2, shuffle=False)
+snapshots = {}
+
+
+class FixedNoiseSnapshots(keras.callbacks.Callback):
+    def on_epoch_end(self, epoch, logs=None):
+        if epoch + 1 in SNAPSHOT_EPOCHS:
+            images = generator(fixed_noise, training=False)
+            snapshots[epoch + 1] = images.detach().cpu().numpy()
+
+
+history = gan.fit(
+    dataset, epochs=EPOCHS, verbose=0, shuffle=False, callbacks=[FixedNoiseSnapshots()]
+)
 generator_losses = [float(value) for value in history.history["generator_loss"]]
-discriminator_losses = [
-    float(value) for value in history.history["discriminator_loss"]
-]
+discriminator_losses = [float(value) for value in history.history["discriminator_loss"]]
+generated = snapshots[EPOCHS]
 """
             ),
-            md("## Fixed-noise evidence"),
-            code(
-                r"""
-generated = generator(fixed_noise, training=False).detach().cpu().numpy()
-"""
-                + _gan_diagnostics_code()
-            ),
+            md(GAN_DIAGNOSTICS_TEXT),
+            code(GAN_DIAGNOSTICS),
+            code(GAN_RECORD, "remove-cell"),
+            md(GAN_RESULTS_TEXT),
         ]
-    else:
-        cells = common_opening + [
-            code(
-                IMAGE_TORCH_IMPORTS
-                + f"""
+    return common_opening + [
+        code(
+            GAN_TORCH_IMPORTS
+            + f"""
 SEED = 42
 EPOCHS = 50  # Reduce to 1 or 2 for a quicker run.
 BATCH_SIZE = 128
 LATENT_DIM = 100
 LABEL_SMOOTHING = {smoothing}
+SNAPSHOT_EPOCHS = sorted({{1, max(1, EPOCHS // 10), max(1, EPOCHS // 2), EPOCHS}})
 random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
-torch.use_deterministic_algorithms(True)
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")  # Deterministic cuBLAS on GPUs.
+torch.use_deterministic_algorithms(True, warn_only=True)
 DEVICE = torch.device(
     "cuda" if torch.cuda.is_available()
     else "mps" if torch.backends.mps.is_available()
@@ -2166,10 +2454,18 @@ loader = DataLoader(
 )
 fixed_noise = torch.randn(16, LATENT_DIM, 1, 1, generator=torch.Generator().manual_seed(SEED))
 """
-            ),
-            md("## Define generator and discriminator"),
-            code(
-                r"""
+        ),
+        md(
+            """## Define the generator and discriminator
+
+The generator upsamples the noise from 1×1 to 7×7, 14×14, and 28×28 with
+transposed convolutions, with batch normalization between them and a tanh
+output. The discriminator mirrors it with two strided convolutions and
+dropout, and ends in one logit. Both use Adam with a small learning rate, as
+GAN training is unstable at larger steps."""
+        ),
+        code(
+            r"""
 generator = nn.Sequential(
     nn.ConvTranspose2d(LATENT_DIM, 256, 7, 1, 0, bias=False),
     nn.BatchNorm2d(256), nn.LeakyReLU(0.2),
@@ -2188,17 +2484,24 @@ criterion = nn.BCEWithLogitsLoss()
 generator_optimizer = torch.optim.Adam(generator.parameters(), lr=1e-4)
 discriminator_optimizer = torch.optim.Adam(discriminator.parameters(), lr=1e-4)
 """
-            ),
-            md("## Train adversarially"),
-            code(
-                r"""
-generator_losses, discriminator_losses = [], []
+        ),
+        md(
+            """## Train
+
+Each batch performs one discriminator update (real images labelled 1,
+generated images 0) and one generator update (rewarding generated images the
+discriminator calls real). Images from the fixed noise are stored at a few
+epochs."""
+        ),
+        code(
+            r"""
+generator_losses, discriminator_losses, snapshots = [], [], {}
 for epoch in range(EPOCHS):
+    generator.train()
     epoch_generator, epoch_discriminator = [], []
     for (real_images,) in loader:
         real_images = real_images.to(DEVICE)
-        batch = len(real_images)
-        noise = torch.randn(batch, LATENT_DIM, 1, 1, device=DEVICE)
+        noise = torch.randn(len(real_images), LATENT_DIM, 1, 1, device=DEVICE)
         generated_images = generator(noise)
 
         discriminator_optimizer.zero_grad()
@@ -2220,45 +2523,57 @@ for epoch in range(EPOCHS):
         epoch_discriminator.append(discriminator_loss.item())
     generator_losses.append(float(np.mean(epoch_generator)))
     discriminator_losses.append(float(np.mean(epoch_discriminator)))
-    print(
-        f"epoch {epoch + 1}: generator={generator_losses[-1]:.4f}, "
-        f"discriminator={discriminator_losses[-1]:.4f}"
-    )
+    if epoch + 1 in SNAPSHOT_EPOCHS:
+        generator.eval()
+        with torch.no_grad():
+            images = generator(fixed_noise.to(DEVICE)).cpu().numpy()
+        snapshots[epoch + 1] = np.transpose(images, (0, 2, 3, 1))
+        print(
+            f"epoch {epoch + 1}: generator loss {generator_losses[-1]:.3f}, "
+            f"discriminator loss {discriminator_losses[-1]:.3f}"
+        )
+generated = snapshots[EPOCHS]
 """
-            ),
-            md("## Fixed-noise evidence"),
-            code(
-                r"""
-generator.eval()
-with torch.no_grad():
-    generated = generator(fixed_noise.to(DEVICE)).cpu().numpy()
-generated = np.transpose(generated, (0, 2, 3, 1))
-"""
-                + _gan_diagnostics_code()
-            ),
-        ]
-    return cells
+        ),
+        md(GAN_DIAGNOSTICS_TEXT),
+        code(GAN_DIAGNOSTICS),
+        code(GAN_RECORD, "remove-cell"),
+        md(GAN_RESULTS_TEXT),
+    ]
 
 
-def _gan_diagnostics_code() -> str:
-    return r"""
-fig, axes = plt.subplots(4, 4, figsize=(6, 6))
-for axis, image in zip(axes.flat, generated):
-    axis.imshow(image.squeeze(), cmap="gray", vmin=-1, vmax=1)
-    axis.axis("off")
-plt.suptitle("Fixed-noise generated samples")
+GAN_DIAGNOSTICS_TEXT = """## Follow the fixed-noise samples
+
+Each row shows the images generated from the same eight noise vectors at a
+later epoch. The loss curves follow; for a GAN they show the balance between
+the two networks, not the quality of the images."""
+
+GAN_DIAGNOSTICS = r"""
+fig, axes = plt.subplots(len(snapshots), 8, figsize=(9, 1.25 * len(snapshots) + 0.4), squeeze=False)
+for row, (epoch, images) in zip(axes, sorted(snapshots.items())):
+    for axis, image in zip(row, images):
+        axis.imshow(image.squeeze(), cmap="gray", vmin=-1, vmax=1)
+        axis.set_xticks([])
+        axis.set_yticks([])
+    row[0].set_ylabel(f"epoch {epoch}", rotation=0, ha="right", va="center")
+fig.suptitle("Images generated from fixed noise")
 plt.tight_layout()
 plt.show()
 
-fig, ax = plt.subplots(figsize=(7, 3.5))
-ax.plot(generator_losses, label="generator")
-ax.plot(discriminator_losses, label="discriminator")
-ax.set(title="Adversarial training losses", xlabel="Epoch", ylabel="Loss")
+fig, ax = plt.subplots(figsize=(7, 3.4))
+ax.plot(np.arange(1, len(generator_losses) + 1), generator_losses, label="generator")
+ax.plot(np.arange(1, len(discriminator_losses) + 1), discriminator_losses, label="discriminator")
+ax.axhline(np.log(2), color="0.6", linestyle=":", label="generator loss at equilibrium, ln 2")
+ax.set(title="Adversarial losses", xlabel="Epoch", ylabel="Binary cross-entropy")
 ax.legend()
+ax.grid(alpha=0.25)
 plt.show()
 
 pixel_diversity = float(generated.std(axis=0).mean())
-print(f"mean per-pixel sample standard deviation: {pixel_diversity:.4f}")
+print(f"mean per-pixel standard deviation across the 16 final samples: {pixel_diversity:.3f}")
+"""
+
+GAN_RECORD = r"""
 print(
     "HELIO_RESULT "
     + json.dumps(
@@ -2277,21 +2592,30 @@ assert np.isfinite(generated).all()
 assert pixel_diversity > 0
 """
 
+GAN_RESULTS_TEXT = """## What the results show
+
+The samples sharpen from blobs into recognizable digits within the first few
+epochs and improve slowly after that. The losses settle near a fixed ratio
+rather than falling, which is the expected behaviour when neither network
+dominates. A GAN has no held-out score as simple as test accuracy: the
+per-pixel spread across samples only guards against collapse onto a single
+image, and judging whether the generator covers all ten digits in the right
+proportions needs a separate classifier or a metric such as the Fréchet
+inception distance."""
+
 
 def generate_gan_module() -> None:
     directory = ROOT / "general-ml" / "advanced" / "generative-models"
     for framework in ("pytorch", "keras"):
-        artifacts = ("demo",)
-        for artifact in artifacts:
-            notebook = make_notebook(
-                title=f"MNIST DCGAN — {artifact.title()} ({'Keras on Torch' if framework == 'keras' else 'Native PyTorch'})",
-                module_id="generative-models",
-                framework=framework,
-                artifact=artifact,
-                datasets=[],
-                cells=gan_cells(framework, artifact),
-            )
-            write_notebook(directory / framework, f"{artifact}.ipynb", notebook)
+        notebook = make_notebook(
+            title=f"Generative Adversarial Network for MNIST: {framework_name(framework)}",
+            module_id="generative-models",
+            framework=framework,
+            artifact="demo",
+            datasets=[],
+            cells=gan_cells(framework, "demo"),
+        )
+        write_notebook(directory / framework, "demo.ipynb", notebook)
 
 
 def dataset_bootstrap_code(
@@ -2402,15 +2726,8 @@ import random
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from sklearn.metrics import (
-    accuracy_score,
-    average_precision_score,
-    balanced_accuracy_score,
-    classification_report,
-    confusion_matrix,
-    precision_recall_curve,
-    roc_auc_score,
-)
+from sklearn.calibration import calibration_curve
+from sklearn.metrics import average_precision_score, confusion_matrix, precision_recall_curve
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
@@ -2421,12 +2738,12 @@ np.random.seed(SEED)
 
 SEP_PREPARE = r"""
 x_supplied_train = pd.read_pickle(dataset_files["x_train.pkl"]).to_numpy(dtype=np.float32)
-x_test = pd.read_pickle(dataset_files["x_test.pkl"]).to_numpy(dtype=np.float32)
+x_test_raw = pd.read_pickle(dataset_files["x_test.pkl"]).to_numpy(dtype=np.float32)
 y_supplied_train = (
     pd.read_pickle(dataset_files["y_train.pkl"]).to_numpy().reshape(-1).astype(np.int64)
 )
 y_test = pd.read_pickle(dataset_files["y_test.pkl"]).to_numpy().reshape(-1).astype(np.int64)
-feature_names = np.asarray([f"anonymous feature {i}" for i in range(x_test.shape[1])])
+feature_names = np.asarray([f"feature {i}" for i in range(x_test_raw.shape[1])])
 
 train_indices, validation_indices = train_test_split(
     np.arange(len(y_supplied_train)),
@@ -2438,71 +2755,126 @@ x_train_raw = x_supplied_train[train_indices]
 y_train = y_supplied_train[train_indices]
 x_validation_raw = x_supplied_train[validation_indices]
 y_validation = y_supplied_train[validation_indices]
+# Standardize with statistics from the training part only.
 scaler = StandardScaler().fit(x_train_raw)
 x_train = scaler.transform(x_train_raw).astype(np.float32)
 x_validation = scaler.transform(x_validation_raw).astype(np.float32)
-x_test_scaled = scaler.transform(x_test).astype(np.float32)
+x_test = scaler.transform(x_test_raw).astype(np.float32)
 
 counts = np.bincount(y_train, minlength=2)
-majority_class = int(np.argmax(counts))
-majority_prediction = np.full_like(y_test, majority_class)
-class_weights = len(y_train) / (2.0 * np.maximum(counts, 1))
+positive_weight = counts[0] / counts[1]  # About 79 non-events per event.
 print(
-    f"train={len(y_train):,}, validation={len(y_validation):,}, "
-    f"supplied test={len(y_test):,}, positive prevalence={y_train.mean():.4f}"
+    f"train={len(y_train):,} ({counts[1]} events), "
+    f"validation={len(y_validation):,} ({y_validation.sum()} events), "
+    f"test={len(y_test):,} ({y_test.sum()} events)"
 )
-print("class weights:", dict(enumerate(class_weights.round(3))))
+print(f"event rate in training: {y_train.mean():.4f}; positive-class weight: {positive_weight:.1f}")
 """
 
 SEP_METRICS = r"""
-def classification_evidence(y_true, probability, label):
-    prediction = (probability >= 0.5).astype(np.int64)
-    evidence = {
-        "accuracy": float(accuracy_score(y_true, prediction)),
-        "balanced_accuracy": float(balanced_accuracy_score(y_true, prediction)),
-        "roc_auc": float(roc_auc_score(y_true, probability)),
-        "pr_auc": float(average_precision_score(y_true, probability)),
-        "confusion_matrix": confusion_matrix(y_true, prediction, labels=[0, 1]).tolist(),
+def verification_scores(y_true, probability, threshold):
+    prediction = probability >= threshold
+    tn, fp, fn, tp = confusion_matrix(y_true, prediction, labels=[0, 1]).ravel()
+    pod = tp / max(tp + fn, 1)  # Probability of detection (recall).
+    pofd = fp / max(fp + tn, 1)  # Probability of false detection.
+    far = fp / max(tp + fp, 1)  # False-alarm ratio.
+    hss_denominator = (tp + fn) * (fn + tn) + (tp + fp) * (fp + tn)
+    return {
+        "hits": int(tp), "misses": int(fn), "false alarms": int(fp),
+        "POD": pod, "FAR": far, "TSS": pod - pofd,
+        "HSS": 2 * (tp * tn - fn * fp) / hss_denominator if hss_denominator else 0.0,
     }
-    print(label, json.dumps(evidence, indent=2))
-    print(classification_report(y_true, prediction, digits=3, zero_division=0))
-    return evidence
 
 
-majority_probability = np.full(len(y_test), float(majority_class))
-majority_evidence = classification_evidence(
-    y_test, majority_probability, "majority-class baseline"
-)
+def choose_threshold(y_true, probability, score):
+    # Pick the probability threshold that maximizes `score` on validation data.
+    candidates = np.unique(np.quantile(probability, np.linspace(0.5, 0.999, 400)))
+    values = [verification_scores(y_true, probability, t)[score] for t in candidates]
+    return float(candidates[int(np.argmax(values))])
+
+
+def bootstrap_intervals(y_true, probability, threshold, repeats=1000):
+    # Resample the test set to show how much the scores move with 23 events.
+    rng = np.random.default_rng(SEED)
+    draws = []
+    for _ in range(repeats):
+        sample = rng.integers(0, len(y_true), len(y_true))
+        if y_true[sample].sum() == 0:
+            continue
+        scores = verification_scores(y_true[sample], probability[sample], threshold)
+        scores["PR-AUC"] = average_precision_score(y_true[sample], probability[sample])
+        draws.append(scores)
+    draws = pd.DataFrame(draws)[["POD", "FAR", "TSS", "HSS", "PR-AUC"]]
+    return draws.quantile([0.025, 0.975]).T.rename(columns={0.025: "2.5%", 0.975: "97.5%"})
 """
 
-SEP_DIAGNOSTICS = r"""
-model_evidence = classification_evidence(y_test, probabilities, "model")
-matrix = np.asarray(model_evidence["confusion_matrix"])
-precision, recall, _ = precision_recall_curve(y_test, probabilities)
+SEP_EVALUATION = r"""
+thresholds = {
+    "TSS": choose_threshold(y_validation, validation_probabilities, "TSS"),
+    "HSS": choose_threshold(y_validation, validation_probabilities, "HSS"),
+}
+rows = {
+    "always 'no event'": verification_scores(y_test, np.zeros(len(y_test)), 0.5),
+    "threshold 0.5": verification_scores(y_test, probabilities, 0.5),
+}
+for score, value in thresholds.items():
+    rows[f"threshold {value:.3f} (best {score} on validation)"] = verification_scores(
+        y_test, probabilities, value
+    )
+table = pd.DataFrame(rows).T
+table["PR-AUC"] = [y_test.mean()] + [average_precision_score(y_test, probabilities)] * 3
+display(table.round(3))
+print("95% bootstrap intervals on the test set:")
+display(
+    pd.concat(
+        {
+            f"best-{score} threshold": bootstrap_intervals(y_test, probabilities, value)
+            for score, value in thresholds.items()
+        },
+        axis=1,
+    ).round(3)
+)
 
-fig, axes = plt.subplots(1, 3, figsize=(13, 3.5))
-axes[0].bar([0, 1], np.bincount(y_train, minlength=2))
-axes[0].set(title="Training class imbalance", xlabel="Class", ylabel="Samples")
-image = axes[1].imshow(matrix, cmap="Blues")
-for (row, column), value in np.ndenumerate(matrix):
-    axes[1].text(column, row, str(value), ha="center", va="center")
-axes[1].set(title="Supplied-test confusion matrix", xlabel="Predicted", ylabel="True")
-fig.colorbar(image, ax=axes[1], fraction=0.046)
+fig, axes = plt.subplots(1, 4, figsize=(16, 3.8))
+for axis, (score, value) in zip(axes[:2], thresholds.items()):
+    matrix = confusion_matrix(y_test, probabilities >= value, labels=[0, 1])
+    axis.imshow(matrix, cmap="Blues", norm="log")
+    for (row, column), count in np.ndenumerate(matrix):
+        axis.text(
+            column, row, str(count), ha="center", va="center",
+            color="white" if count > matrix.max() / 10 else "black",
+        )
+    axis.set(
+        title=f"Best-{score} threshold ({value:.3f})",
+        xticks=[0, 1], yticks=[0, 1], xticklabels=["no event", "event"],
+        yticklabels=["no event", "event"], xlabel="Forecast", ylabel="Observed",
+    )
+precision, recall, _ = precision_recall_curve(y_test, probabilities)
 axes[2].plot(recall, precision)
-axes[2].axhline(y_test.mean(), linestyle=":", color="black", label="prevalence")
-axes[2].set(title="Precision-recall curve", xlabel="Recall", ylabel="Precision")
+axes[2].axhline(y_test.mean(), linestyle=":", color="black", label="event rate")
+axes[2].set(title="Precision-recall curve", xlabel="Recall (POD)", ylabel="Precision")
 axes[2].legend()
+observed, forecast = calibration_curve(y_test, probabilities, n_bins=8, strategy="quantile")
+axes[3].plot([0, 1], [0, 1], linestyle=":", color="black", label="perfect reliability")
+axes[3].plot(forecast, observed, marker="o", label="model")
+axes[3].set(
+    title="Reliability (8 equal-count bins)",
+    xlabel="Forecast probability", ylabel="Observed event frequency",
+)
+axes[3].legend()
 plt.tight_layout()
 plt.show()
+"""
 
+SEP_RECORD = r"""
 print(
     "HELIO_RESULT "
     + json.dumps(
         {
-            "balanced_accuracy": model_evidence["balanced_accuracy"],
-            "majority_balanced_accuracy": majority_evidence["balanced_accuracy"],
-            "roc_auc": model_evidence["roc_auc"],
-            "pr_auc": model_evidence["pr_auc"],
+            "thresholds": thresholds,
+            "tss_at_best_tss": float(table.iloc[2]["TSS"]),
+            "hss_at_best_hss": float(table.iloc[3]["HSS"]),
+            "pr_auc": float(average_precision_score(y_test, probabilities)),
             "prediction_shape": list(probabilities.shape),
         },
         sort_keys=True,
@@ -2512,76 +2884,97 @@ assert probabilities.shape == y_test.shape
 assert np.isfinite(probabilities).all()
 """
 
+SEP_INTRO = """
+The data come from Aminalragia-Giamini et al. (2021), who predicted solar
+energetic particle (SEP) events from soft X-ray flare measurements. Each sample
+has 49 standardized predictors and a binary label. The archive has no column
+names, event identifiers, or timestamps, so two limits apply throughout:
+predictors cannot be interpreted physically, and samples from the same event
+may fall on both sides of the train/test split.
+"""
+
+SEP_SCORES_TEXT = """## Verification scores
+
+SEP events make up about 1.3% of the samples, so a forecast of "no event"
+is right 98.7% of the time and useless. We therefore report the scores used
+in space-weather verification, computed from hits, misses, and false alarms:
+
+- **POD**, the probability of detection: the fraction of events forecast.
+- **FAR**, the false-alarm ratio: the fraction of event forecasts that were wrong.
+- **TSS** = POD minus the probability of false detection. It ranges from −1
+  to 1 and does not depend on the event rate.
+- **HSS**, the Heidke skill score: accuracy relative to random forecasts with
+  the same event rate.
+
+A probabilistic model needs a threshold to issue yes/no forecasts. We choose
+two on the validation set, one maximizing TSS and one maximizing HSS, and
+apply both unchanged to the test set. With only 23 test events, a bootstrap
+shows how far each score could move by chance."""
+
+SEP_RESULTS_TEXT = """## Evaluate on the supplied test set
+
+The table compares the model at three thresholds with a forecast of "no
+event". The reliability
+diagram checks whether a forecast probability of $p$ corresponds to an event
+frequency of $p$. Class weighting inflates predicted probabilities, so points
+below the diagonal are expected."""
+
 
 def sep_neural_cells(framework: str) -> list[nbformat.NotebookNode]:
-    framework_label = (
-        "Keras 3 — PyTorch Backend" if framework == "keras" else "Native PyTorch"
-    )
+    framework_label = "Keras 3" if framework == "keras" else "PyTorch"
     cells = [
         md(
             f"""
-# SEP Occurrence Forecasting — {framework_label}
+# SEP Occurrence Forecasting: {framework_label}
 
-This research-style workflow uses the archived train/test pickles exactly
-as supplied. The 49 predictors are anonymous, and the archive has no event IDs
-or timestamps. Consequently, this is sample-level teaching evidence: it cannot
-establish event-aware generalization or physical feature attribution.
+{SEP_INTRO.strip()}
 
-In Colab, choose **Runtime → Run all**; the bootstrap downloads and verifies
-only four pickles.
+This notebook trains a small neural classifier and evaluates it with
+verification scores suited to rare events.
 """
         ),
+        md("## Imports"),
+        code(SEP_IMPORTS, "hide-input"),
         md(
-            """## Imports and deterministic configuration
+            """## Load the data
 
-These tools handle the tabular archive, preprocessing, classification metrics,
-and figures. The fixed seed keeps the sample-level comparison reproducible."""
+The four pickles are downloaded once and checked against their SHA-256
+checksums."""
         ),
-        code(SEP_IMPORTS),
+        code(dataset_bootstrap_code("sep-curated", SEP_FILES), "hide-input"),
         md(
-            """## Resolve the immutable archive
+            """## Split and standardize
 
-The four supplied files contain the archived training and test samples. Their
-checksums are verified so every implementation starts from the same data."""
-        ),
-        code(dataset_bootstrap_code("sep-curated", SEP_FILES)),
-        md(
-            """## Preserve the supplied test set and split training samples
-
-The supplied test set remains untouched. A stratified part of the supplied
-training samples is reserved for validation, and scaling is fitted only on the
-remaining training samples."""
+The supplied test set is kept for the final evaluation. A stratified 15% of
+the supplied training samples becomes the validation set, used for early
+stopping and for choosing the decision threshold."""
         ),
         code(SEP_PREPARE),
-        md(
-            """## Establish the majority-class baseline
-
-SEP occurrences are rare in this archive, so overall accuracy alone can be
-misleading. The majority-class result provides context for the imbalance-aware
-metrics used below."""
-        ),
+        md(SEP_SCORES_TEXT),
         code(SEP_METRICS),
     ]
     if framework == "keras":
         cells.extend(
             [
                 md(
-                    """## Train the weighted Keras classifier
+                    """## Train a weighted classifier
 
-The network estimates the probability of SEP occurrence from the anonymous
-predictors. Class weights give the less frequent SEP samples greater influence
-during fitting."""
+The network outputs the probability of an SEP event. Class weights make each
+event count about 79 times as much as a non-event in the loss, so the rare
+class is not ignored. Early stopping restores the epoch with the lowest
+validation loss."""
                 ),
                 code(
                     r"""
 os.environ["KERAS_BACKEND"] = "torch"
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")  # Deterministic cuBLAS on GPUs.
 import keras
 import torch
 from keras import layers
 
 EPOCHS = 40  # Reduce to 5 or 10 for a quicker run.
 keras.utils.set_random_seed(SEED)
-torch.use_deterministic_algorithms(True)  # Prefer repeatable operations when available.
+torch.use_deterministic_algorithms(True, warn_only=True)
 assert keras.backend.backend() == "torch"
 # Define the neural network used for SEP occurrence classification.
 model = keras.Sequential(
@@ -2594,40 +2987,28 @@ model = keras.Sequential(
         layers.Dense(1, activation="sigmoid"),
     ]
 )
-model.compile(
-    optimizer=keras.optimizers.Adam(),  # Adam updates the model weights.
-    loss="binary_crossentropy",  # Binary classification error.
-    metrics=["accuracy"],
-)
+model.compile(optimizer=keras.optimizers.Adam(), loss="binary_crossentropy")
 history = model.fit(
     x_train,
     y_train,
     validation_data=(x_validation, y_validation),
     epochs=EPOCHS,
-    batch_size=256,  # Number of samples used for each parameter update.
-    class_weight={0: class_weights[0], 1: class_weights[1]},  # Account for the rare SEP class.
+    batch_size=256,
+    class_weight={0: 1.0, 1: positive_weight},
     callbacks=[
         keras.callbacks.EarlyStopping(
             monitor="val_loss", patience=5, restore_best_weights=True
         )
     ],
-    verbose=2,
+    verbose=0,
 )
-probabilities = model.predict(x_test_scaled, verbose=0).reshape(-1)
-"""
-                ),
-                md(
-                    """## Inspect learning behavior
+validation_probabilities = model.predict(x_validation, verbose=0).reshape(-1)
+probabilities = model.predict(x_test, verbose=0).reshape(-1)
 
-The training and validation losses show whether the classifier continues to
-improve or begins to specialize too strongly to the training samples."""
-                ),
-                code(
-                    r"""
 fig, ax = plt.subplots(figsize=(7, 3.5))
 ax.plot(history.history["loss"], label="training")
 ax.plot(history.history["val_loss"], label="validation")
-ax.set(title="Weighted binary cross-entropy", xlabel="Epoch", ylabel="Loss")
+ax.set(title="Binary cross-entropy", xlabel="Epoch", ylabel="Loss")
 ax.legend()
 plt.show()
 """
@@ -2638,11 +3019,12 @@ plt.show()
         cells.extend(
             [
                 md(
-                    """## Train the weighted PyTorch classifier
+                    """## Train a weighted classifier
 
-The network estimates the probability of SEP occurrence from the anonymous
-predictors. The weighted loss gives the less frequent SEP samples greater
-influence during fitting."""
+The network outputs one logit, the log-odds of an SEP event. The loss weights
+each event about 79 times as much as a non-event, so the rare class is not
+ignored. Training stops when the validation loss has not improved for five
+epochs, and the best state is restored."""
                 ),
                 code(
                     r"""
@@ -2652,7 +3034,8 @@ from torch.utils.data import DataLoader, TensorDataset
 
 EPOCHS = 40  # Reduce to 5 or 10 for a quicker run.
 torch.manual_seed(SEED)
-torch.use_deterministic_algorithms(True, warn_only=True)  # Prefer repeatable operations when available.
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")  # Deterministic cuBLAS on GPUs.
+torch.use_deterministic_algorithms(True, warn_only=True)
 DEVICE = torch.device(
     "cuda" if torch.cuda.is_available()
     else "mps" if torch.backends.mps.is_available()
@@ -2668,68 +3051,60 @@ model = nn.Sequential(
     nn.ReLU(),
     nn.Linear(30, 1),
 ).to(DEVICE)
-# Give the rare positive class additional weight in the loss.
-positive_weight = torch.tensor(
-    [counts[0] / max(counts[1], 1)], dtype=torch.float32, device=DEVICE
+loss_function = nn.BCEWithLogitsLoss(
+    pos_weight=torch.tensor([positive_weight], dtype=torch.float32, device=DEVICE)
 )
-loss_function = nn.BCEWithLogitsLoss(pos_weight=positive_weight)  # Weighted binary classification error.
-optimizer = torch.optim.Adam(model.parameters())  # Adam updates the model weights.
+optimizer = torch.optim.Adam(model.parameters())
 loader = DataLoader(
     TensorDataset(torch.from_numpy(x_train), torch.from_numpy(y_train).float()),
-    batch_size=256,  # Number of samples used for each parameter update.
+    batch_size=256,
     shuffle=True,
     generator=torch.Generator().manual_seed(SEED),
 )
+x_validation_tensor = torch.from_numpy(x_validation).to(DEVICE)
+y_validation_tensor = torch.from_numpy(y_validation).float().to(DEVICE)
 training_losses, validation_losses = [], []
-best_state, best_loss, patience_left = None, float("inf"), 5
+best_state, best_loss, stale_epochs = None, float("inf"), 0
 for epoch in range(EPOCHS):
     model.train()
-    batch_losses = []
+    total = 0.0
     for batch_x, batch_y in loader:
         optimizer.zero_grad()
-        logits = model(batch_x.to(DEVICE)).squeeze(1)
-        loss = loss_function(logits, batch_y.to(DEVICE))
+        loss = loss_function(model(batch_x.to(DEVICE)).squeeze(1), batch_y.to(DEVICE))
         loss.backward()
         optimizer.step()
-        batch_losses.append(loss.item())
+        total += loss.item() * len(batch_y)
     model.eval()
     with torch.no_grad():
-        val_logits = model(torch.from_numpy(x_validation).to(DEVICE)).squeeze(1)
-        val_loss = loss_function(
-            val_logits, torch.from_numpy(y_validation).float().to(DEVICE)
+        validation_loss = loss_function(
+            model(x_validation_tensor).squeeze(1), y_validation_tensor
         ).item()
-    training_losses.append(float(np.mean(batch_losses)))
-    validation_losses.append(val_loss)
-    print(f"epoch {epoch + 1}: loss={training_losses[-1]:.4f}, val={val_loss:.4f}")
-    if val_loss < best_loss:
-        best_loss = val_loss
-        best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
-        patience_left = 5
+    training_losses.append(total / len(loader.dataset))
+    validation_losses.append(validation_loss)
+    if validation_loss < best_loss:
+        best_loss, stale_epochs = validation_loss, 0
+        best_state = {key: value.detach().clone() for key, value in model.state_dict().items()}
     else:
-        patience_left -= 1
-        if patience_left == 0:
+        stale_epochs += 1
+        if stale_epochs >= 5:
             break
 model.load_state_dict(best_state)
-model.to(DEVICE).eval()
-with torch.no_grad():
-    probabilities = (
-        torch.sigmoid(model(torch.from_numpy(x_test_scaled).to(DEVICE)).squeeze(1))
-        .cpu()
-        .numpy()
-    )
-"""
-                ),
-                md(
-                    """## Inspect learning behavior
+model.eval()
 
-The training and validation losses show whether the classifier continues to
-improve or begins to specialize too strongly to the training samples."""
-                ),
-                code(
-                    r"""
+
+def predict_probability(x):
+    with torch.no_grad():
+        logits = model(torch.from_numpy(x).to(DEVICE)).squeeze(1)
+    return torch.sigmoid(logits).cpu().numpy()
+
+
+validation_probabilities = predict_probability(x_validation)
+probabilities = predict_probability(x_test)
+
 fig, ax = plt.subplots(figsize=(7, 3.5))
 ax.plot(training_losses, label="training")
 ax.plot(validation_losses, label="validation")
+ax.axvline(int(np.argmin(validation_losses)), color="0.6", linestyle=":", label="restored epoch")
 ax.set(title="Weighted binary cross-entropy", xlabel="Epoch", ylabel="Loss")
 ax.legend()
 plt.show()
@@ -2739,14 +3114,23 @@ plt.show()
         )
     cells.extend(
         [
+            md(SEP_RESULTS_TEXT),
+            code(SEP_EVALUATION),
+            code(SEP_RECORD, "remove-cell"),
             md(
-                """## Evaluate the untouched supplied test set
+                """## What the results show
 
-The final comparison reports class-wise behavior, balanced accuracy, ROC-AUC,
-and PR-AUC on the supplied test samples. These are sample-level results because
-the archive has no event identifiers or timestamps."""
+The threshold matters as much as the model. When events are rare, even a
+hundred false alarms barely raise the probability of false detection, so
+maximizing TSS pushes the threshold down until nearly every event is caught
+and most alarms are false. HSS penalizes false alarms more and selects a
+higher threshold. Which to use depends on the relative cost of a missed event
+and a false alarm, a decision for the forecaster rather than the model.
+
+Read the bootstrap intervals before the point estimates: with 23 events, each
+missed event moves POD by about 0.04. Because the split is by sample rather
+than by event, all of these scores are likely optimistic."""
             ),
-            code(SEP_DIAGNOSTICS),
         ]
     )
     return cells
@@ -2765,62 +3149,84 @@ model = XGBClassifier(
     colsample_bytree=0.8,
     objective="binary:logistic",
     eval_metric="logloss",
-    scale_pos_weight=float(counts[0] / max(counts[1], 1)),
+    early_stopping_rounds=30,
+    scale_pos_weight=positive_weight,
     random_state=SEED,
     n_jobs=2,
 )
 model.fit(x_train, y_train, eval_set=[(x_validation, y_validation)], verbose=False)
-probabilities = model.predict_proba(x_test_scaled)[:, 1]
+print(f"boosting rounds kept by early stopping: {model.best_iteration + 1} of {ROUNDS}")
+validation_probabilities = model.predict_proba(x_validation)[:, 1]
+probabilities = model.predict_proba(x_test)[:, 1]
 """
+
+SEP_XGB_TEXT = """## Train a weighted boosted-tree model
+
+XGBoost fits an ensemble of shallow trees, each correcting the errors of the
+ones before it. `scale_pos_weight` gives events the same weight as in the
+neural notebooks, and early stopping on the validation set chooses the
+number of trees."""
 
 
 def sep_framework_neutral_cells(kind: str) -> list[nbformat.NotebookNode]:
-    title = {
-        "demo": "XGBoost Demonstration",
-        "validation": "Repeated Sample-Level Validation",
-        "interpretability": "SHAP Demonstration",
+    title, purpose = {
+        "demo": (
+            "XGBoost",
+            "This notebook trains a gradient-boosted tree classifier on the same "
+            "split as the neural notebooks and scores it the same way.",
+        ),
+        "validation": (
+            "Repeated Validation",
+            "One train/test split gives one number. This notebook repeats "
+            "stratified cross-validation within the supplied training set to show "
+            "how much the scores vary from one partition to the next.",
+        ),
+        "interpretability": (
+            "SHAP Attributions",
+            "This notebook computes SHAP values for the XGBoost model and checks "
+            "whether the feature ranking survives a change of random seed.",
+        ),
     }[kind]
     cells = [
         md(
             f"""
-# SEP Occurrence Forecasting — {title}
+# SEP Occurrence Forecasting: {title}
 
-The archived 49 predictors are anonymous and have no timestamps or event IDs.
-Every result below is therefore sample-level teaching evidence, not an
-event-aware forecast claim or a physical attribution.
+{SEP_INTRO.strip()}
+
+{purpose}
 """
         ),
+        md("## Imports"),
+        code(SEP_IMPORTS, "hide-input"),
         md(
-            """## Imports and deterministic configuration
+            """## Load the data
 
-These tools handle the archived samples, preprocessing, imbalance-aware
-metrics, and the framework-neutral tree analysis."""
+The four pickles are downloaded once and checked against their SHA-256
+checksums."""
         ),
-        code(SEP_IMPORTS),
+        code(dataset_bootstrap_code("sep-curated", SEP_FILES), "hide-input"),
         md(
-            """## Resolve the immutable archive
+            """## Split and standardize
 
-The four supplied files contain the archived training and test samples. Their
-checksums are verified before any analysis is performed."""
-        ),
-        code(dataset_bootstrap_code("sep-curated", SEP_FILES)),
-        md(
-            """## Preserve the supplied test set and split training samples
-
-The supplied test set remains untouched. Validation samples are drawn only
-from the supplied training set, and preprocessing is fitted without using the
-test samples."""
+The supplied test set is kept for the final evaluation. A stratified 15% of
+the supplied training samples becomes the validation set. Trees do not need
+standardized inputs; we standardize anyway so all SEP notebooks share one
+preprocessing step."""
         ),
         code(SEP_PREPARE),
+        md(SEP_SCORES_TEXT),
+        code(SEP_METRICS),
     ]
     if kind == "validation":
         cells.extend(
             [
                 md(
-                    """## Repeated stratified validation within supplied training samples
+                    """## Repeated stratified cross-validation
 
-Repeated stratified folds show how sensitive the tree model is to the particular
-sample-level partition. Each fold preserves the strong class imbalance."""
+Five folds, repeated three times with different shuffles, give 15 estimates.
+Each fold keeps the 1.3% event rate. The threshold is fixed at 0.5 here so
+that the spread reflects the data partition alone."""
                 ),
                 code(
                     r"""
@@ -2831,7 +3237,6 @@ N_SPLITS = 5  # Reduce to 2 for a quicker validation run.
 N_REPEATS = 3  # Reduce to 1 for a quicker validation run.
 ROUNDS = 200  # Reduce to 20 or 50 for a quicker validation run.
 # Repeat the sample-level validation with the same class balance in each fold.
-features = scaler.fit_transform(x_supplied_train).astype(np.float32)
 folds = RepeatedStratifiedKFold(
     n_splits=N_SPLITS,
     n_repeats=N_REPEATS,
@@ -2839,13 +3244,9 @@ folds = RepeatedStratifiedKFold(
 )
 scores = []
 for fold, (fold_train, fold_validation) in enumerate(
-    folds.split(features, y_supplied_train), start=1
+    folds.split(x_supplied_train, y_supplied_train), start=1
 ):
-    fold_scaler = StandardScaler().fit(x_supplied_train[fold_train])
-    fold_x_train = fold_scaler.transform(x_supplied_train[fold_train])
-    fold_x_validation = fold_scaler.transform(x_supplied_train[fold_validation])
-    fold_y_train = y_supplied_train[fold_train]
-    fold_counts = np.bincount(fold_y_train, minlength=2)
+    fold_counts = np.bincount(y_supplied_train[fold_train], minlength=2)
     fold_model = XGBClassifier(
         n_estimators=ROUNDS,
         max_depth=6,
@@ -2853,129 +3254,174 @@ for fold, (fold_train, fold_validation) in enumerate(
         subsample=0.8,
         colsample_bytree=0.8,
         eval_metric="logloss",
-        scale_pos_weight=float(fold_counts[0] / max(fold_counts[1], 1)),
+        scale_pos_weight=fold_counts[0] / fold_counts[1],
         random_state=SEED + fold,
         n_jobs=2,
     )
-    fold_model.fit(fold_x_train, fold_y_train)
-    fold_probability = fold_model.predict_proba(fold_x_validation)[:, 1]
-    score = {
-        "balanced_accuracy": balanced_accuracy_score(
-            y_supplied_train[fold_validation], fold_probability >= 0.5
-        ),
-        "roc_auc": roc_auc_score(y_supplied_train[fold_validation], fold_probability),
-        "pr_auc": average_precision_score(
-            y_supplied_train[fold_validation], fold_probability
-        ),
-    }
+    fold_model.fit(x_supplied_train[fold_train], y_supplied_train[fold_train])
+    fold_probability = fold_model.predict_proba(x_supplied_train[fold_validation])[:, 1]
+    fold_truth = y_supplied_train[fold_validation]
+    score = verification_scores(fold_truth, fold_probability, 0.5)
+    score["PR-AUC"] = average_precision_score(fold_truth, fold_probability)
     scores.append(score)
-    print(f"fold {fold}:", score)
-summary = {
-    metric: {
-        "mean": float(np.mean([score[metric] for score in scores])),
-        "std": float(np.std([score[metric] for score in scores])),
-    }
-    for metric in scores[0]
-}
-print(json.dumps(summary, indent=2))
-print("HELIO_RESULT " + json.dumps({"folds": len(scores), **summary}, sort_keys=True))
+
+scores = pd.DataFrame(scores, index=pd.RangeIndex(1, len(scores) + 1, name="fold"))
+metrics = ["POD", "FAR", "TSS", "HSS", "PR-AUC"]
+display(scores[metrics].describe().loc[["mean", "std", "min", "max"]].round(3))
+
+fig, ax = plt.subplots(figsize=(7, 3.5))
+ax.boxplot([scores[metric] for metric in metrics], tick_labels=metrics)
+for position, metric in enumerate(metrics, start=1):
+    ax.scatter(np.full(len(scores), position), scores[metric], s=10, color="tab:blue", alpha=0.6)
+ax.set(title=f"Scores across {len(scores)} folds (threshold 0.5)", ylim=(0, 1))
+ax.grid(alpha=0.25, axis="y")
+plt.show()
 """
+                ),
+                code(
+                    r"""
+print(
+    "HELIO_RESULT "
+    + json.dumps(
+        {
+            "folds": len(scores),
+            **{
+                metric: {"mean": float(scores[metric].mean()), "std": float(scores[metric].std())}
+                for metric in metrics
+            },
+        },
+        sort_keys=True,
+    )
+)
+""",
+                    "remove-cell",
                 ),
                 md(
                     """
-## How to read the validation result
+## What the results show
 
-These folds estimate sensitivity to a sample-level partition. Without event
-identifiers, they cannot detect leakage between measurements from the same
-physical event.
+The fold-to-fold range is the honest uncertainty on any single split. A
+difference between two models smaller than this range is not evidence that
+one is better. These folds are still sample-level: without event
+identifiers, they cannot detect leakage between samples from the same event,
+so the scores remain an upper bound on performance for unseen events.
 """
                 ),
             ]
         )
         return cells
 
+    cells.extend([md(SEP_XGB_TEXT), code(SEP_XGB_TRAIN)])
     if kind == "interpretability":
         cells.extend(
             [
                 md(
-                    """## Establish the majority-class baseline
+                    """## Compute SHAP values
 
-Because non-SEP samples dominate the archive, the majority-class result is a
-useful reminder that accuracy by itself is not sufficient."""
-                ),
-                code(SEP_METRICS),
-            ]
-        )
-    cells.extend(
-        [
-            md(
-                """## Train the weighted boosted-tree model
-
-XGBoost provides a nonlinear, non-neural comparison using the same split and
-class weighting as the other SEP demonstrations."""
-            ),
-            code(SEP_XGB_TRAIN),
-        ]
-    )
-    if kind == "interpretability":
-        cells.extend(
-            [
-                md(
-                    """## Summarize anonymous feature influence with SHAP
-
-SHAP summarizes how strongly each anonymous column affects this fitted model.
-Without physical feature names, the plot describes model sensitivity rather
-than a physical attribution."""
+For each test sample, SHAP splits the model's output (in log-odds) into one
+contribution per feature. The beeswarm plot shows the contributions of the
+twelve most influential features; colour gives the feature value. Because the
+features are unnamed, this describes what the model relies on, not the
+physics of SEP production."""
                 ),
                 code(
                     r"""
 import warnings
 
 warnings.filterwarnings("ignore", message="IProgress not found.*")
+warnings.filterwarnings("ignore", message="The NumPy global RNG was seeded")
 import shap
 
-background_count = min(500, len(x_train))
-explain_count = min(300, len(x_test_scaled))
-# Compute model-attribution values for a representative sample of test rows.
+# Compute model-attribution values for every test sample.
 explainer = shap.TreeExplainer(model)
-shap_values = explainer.shap_values(x_test_scaled[:explain_count])
-if isinstance(shap_values, list):
-    shap_values = shap_values[-1]
-importance = np.abs(np.asarray(shap_values)).mean(axis=0)
-order = np.argsort(importance)[-12:]
-fig, ax = plt.subplots(figsize=(8, 5))
-ax.barh(feature_names[order], importance[order])
-ax.set(title="Mean absolute SHAP value (anonymous columns)", xlabel="mean |SHAP|")
+shap_values = np.asarray(explainer.shap_values(x_test))
+importance = np.abs(shap_values).mean(axis=0)
+shap.summary_plot(
+    shap_values, x_test, feature_names=feature_names, max_display=12, show=False
+)
+plt.title("SHAP values on the test set")
 plt.tight_layout()
 plt.show()
-probabilities = model.predict_proba(x_test_scaled)[:, 1]
-model_evidence = classification_evidence(y_test, probabilities, "model")
+"""
+                ),
+                md(
+                    """## Is the ranking stable?
+
+An explanation is only useful if it does not change when nothing important
+changes. We refit the model with a different random seed, recompute SHAP
+values, and compare the two importance rankings."""
+                ),
+                code(
+                    r"""
+from scipy.stats import spearmanr
+
+refit = XGBClassifier(**{**model.get_params(), "random_state": SEED + 1})
+refit.fit(x_train, y_train, eval_set=[(x_validation, y_validation)], verbose=False)
+refit_importance = np.abs(np.asarray(shap.TreeExplainer(refit).shap_values(x_test))).mean(axis=0)
+
+top = 10
+first_top = set(np.argsort(importance)[-top:])
+second_top = set(np.argsort(refit_importance)[-top:])
+rank_correlation = spearmanr(importance, refit_importance).statistic
+print(f"Spearman rank correlation of mean |SHAP|: {rank_correlation:.3f}")
+print(f"features shared by the two top-{top} lists: {len(first_top & second_top)}")
+
+fig, ax = plt.subplots(figsize=(5, 5))
+ax.scatter(importance, refit_importance, s=15)
+limit = 1.05 * max(importance.max(), refit_importance.max())
+ax.plot([0, limit], [0, limit], linestyle=":", color="black")
+ax.set(
+    xlabel=f"mean |SHAP|, seed {SEED}", ylabel=f"mean |SHAP|, seed {SEED + 1}",
+    title="Feature importance under two seeds", xlim=(0, limit), ylim=(0, limit),
+)
+plt.show()
+"""
+                ),
+                code(
+                    r"""
 print(
     "HELIO_RESULT "
     + json.dumps(
         {
-            "explained_samples": explain_count,
-            "shap_shape": list(np.asarray(shap_values).shape),
-            "balanced_accuracy": model_evidence["balanced_accuracy"],
+            "explained_samples": int(shap_values.shape[0]),
+            "shap_shape": list(shap_values.shape),
+            "rank_correlation": float(rank_correlation),
         },
         sort_keys=True,
     )
 )
-"""
+""",
+                    "remove-cell",
+                ),
+                md(
+                    """## What the results show
+
+Importance falls off gradually from the top feature rather than resting on
+one or two predictors. The ranking is largely preserved under a new seed (a
+rank correlation near 0.96, with most of the top ten features shared), so
+the model's reliance on these features is not an accident of one fit. What those features measure cannot be recovered from
+this archive. Correlated predictors can also share or swap attribution, so a
+low rank does not mean a feature is irrelevant."""
                 ),
             ]
         )
     else:
         cells.extend(
             [
+                md(SEP_RESULTS_TEXT),
+                code(SEP_EVALUATION),
+                code(SEP_RECORD, "remove-cell"),
                 md(
-                    """## Evaluate the untouched supplied test set
+                    """## What the results show
 
-The final metrics use the supplied test set only after the tree model is fixed.
-Balanced accuracy and PR-AUC are emphasized because SEP occurrences are rare."""
+The two validation-chosen thresholds differ by almost two orders of
+magnitude, and they produce very different forecasts: one catches nearly
+every event at the cost of about five false alarms per hit, the other issues
+few false alarms but misses about half of the events. Compare models using
+the bootstrap intervals rather than the point values: with 23 test events,
+differences of a few hundredths in TSS are within the noise. As in the neural notebooks, the split is by
+sample, not by event, so the scores are likely optimistic."""
                 ),
-                code(SEP_METRICS),
-                code(SEP_DIAGNOSTICS),
             ]
         )
     return cells
@@ -2984,9 +3430,9 @@ Balanced accuracy and PR-AUC are emphasized because SEP occurrences are rare."""
 def generate_sep_module() -> None:
     directory = ROOT / "heliophysics" / "research-case-studies" / "sep-occurrence-forecasting"
     for framework in ("keras", "pytorch"):
-        framework_title = "Keras 3 on Torch" if framework == "keras" else "Native PyTorch"
+        framework_title = "Keras 3" if framework == "keras" else "PyTorch"
         notebook = make_notebook(
-            title=f"SEP Occurrence Forecasting — {framework_title}",
+            title=f"SEP Occurrence Forecasting: {framework_title}",
             module_id="sep-occurrence-forecasting",
             framework=framework,
             artifact="demo",
@@ -3000,7 +3446,7 @@ def generate_sep_module() -> None:
         ("interpretability", "interpretability.ipynb", "shap"),
     ):
         notebook = make_notebook(
-            title=f"SEP Occurrence Forecasting — {kind.title()}",
+            title=f"SEP Occurrence Forecasting: {kind.title()}",
             module_id="sep-occurrence-forecasting",
             framework="framework-neutral",
             artifact=kind,
@@ -3045,7 +3491,8 @@ import random
 
 import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import pandas as pd
+from sklearn.metrics import mean_squared_error, r2_score
 
 SEED = 42
 random.seed(SEED)
@@ -3060,241 +3507,203 @@ length = np.load(dataset_files["LNGTH_L2D.npy"]).astype(np.float32)
 footpoint_distance = np.load(dataset_files["DST2D_FP.npy"]).astype(np.float32)
 top_angle = np.load(dataset_files["angle_top.npy"]).astype(np.float32)
 
+# The arrays store one loop per column; transpose to (loop, point).
 point_slice = slice(None)
-train_indices = np.arange(0, 3000)
-validation_indices = np.arange(3000, 3750)
-test_indices = np.arange(3750, 5000)
+x_projected = np.asarray(x_coordinates[point_slice], dtype=np.float32).T
+y_projected = np.asarray(y_coordinates[point_slice], dtype=np.float32).T
+heights = np.asarray(z_coordinates[point_slice], dtype=np.float32).T
+loop_count, point_count = heights.shape
 
-
-def assemble(indices):
-    x = np.asarray(x_coordinates[point_slice, indices], dtype=np.float32).T
-    y = np.asarray(y_coordinates[point_slice, indices], dtype=np.float32).T
-    z = np.asarray(z_coordinates[point_slice, indices], dtype=np.float32).T
-    points = x.shape[1]
-    scalars = np.stack(
-        [length[indices], footpoint_distance[indices], top_angle[indices]], axis=1
-    )
-    scalar_channels = np.repeat(scalars[:, None, :], points, axis=1)
-    features = np.concatenate([x[..., None], y[..., None], scalar_channels], axis=2)
-    return features, z
-
-
-x_train_raw, y_train_raw = assemble(train_indices)
-x_validation_raw, y_validation_raw = assemble(validation_indices)
-x_test_raw, y_test_raw = assemble(test_indices)
-
-# Estimate normalization from the training loops only.
-feature_mean = x_train_raw.mean(axis=(0, 1), keepdims=True)
-feature_std = x_train_raw.std(axis=(0, 1), keepdims=True)
-feature_std[feature_std < 1e-7] = 1
-target_mean = y_train_raw.mean(axis=0, keepdims=True)
-target_std = y_train_raw.std(axis=0, keepdims=True)
-target_std[target_std < 1e-7] = 1
-
-x_train = ((x_train_raw - feature_mean) / feature_std).astype(np.float32)
-x_validation = ((x_validation_raw - feature_mean) / feature_std).astype(np.float32)
-x_test = ((x_test_raw - feature_mean) / feature_std).astype(np.float32)
-y_train = ((y_train_raw - target_mean) / target_std).astype(np.float32)
-y_validation = ((y_validation_raw - target_mean) / target_std).astype(np.float32)
-# Use the mean training height profile as a simple reference reconstruction.
-training_mean_prediction = np.repeat(target_mean, len(y_test_raw), axis=0)
-
-assert train_indices.max() < validation_indices.min() < test_indices.min()
+# Express each projected loop in its own footpoint frame: `along` runs parallel
+# to the line joining the two footpoints and `across` is perpendicular to it.
+# The network then sees the shape of a loop, not its position on the disk.
+baseline_x = x_projected[:, -1:] - x_projected[:, :1]
+baseline_y = y_projected[:, -1:] - y_projected[:, :1]
+baseline_length = np.hypot(baseline_x, baseline_y)
+unit_x, unit_y = baseline_x / baseline_length, baseline_y / baseline_length
+relative_x = x_projected - x_projected[:, :1]
+relative_y = y_projected - y_projected[:, :1]
+along = relative_x * unit_x + relative_y * unit_y
+across = relative_y * unit_x - relative_x * unit_y
+descriptors = np.stack([length, footpoint_distance, top_angle], axis=1)
+features = np.concatenate(
+    [
+        along[..., None],
+        across[..., None],
+        np.repeat(descriptors[:, None, :], point_count, axis=1),
+    ],
+    axis=2,
+).astype(np.float32)
 print(
-    f"train={len(train_indices)}, validation={len(validation_indices)}, "
-    f"test={len(test_indices)}, points per loop={y_train.shape[1]}"
+    f"loops={loop_count:,}, points per loop={point_count}, "
+    f"input channels={features.shape[2]} (along, across, length, "
+    "footpoint distance, apex angle)"
 )
 """
 
-CORONAL_EVIDENCE = r"""
-def regression_evidence(y_true, y_prediction):
-    point_mae = float(mean_absolute_error(y_true.ravel(), y_prediction.ravel()))
-    point_rmse = float(mean_squared_error(y_true.ravel(), y_prediction.ravel()) ** 0.5)
-    loop_mae = np.mean(np.abs(y_true - y_prediction), axis=1)
-    loop_rmse = np.sqrt(np.mean((y_true - y_prediction) ** 2, axis=1))
-    return {
-        "point_mae": point_mae,
-        "point_rmse": point_rmse,
-        "r2": float(r2_score(y_true.ravel(), y_prediction.ravel())),
-        "loop_mae_mean": float(loop_mae.mean()),
-        "loop_mae_median": float(np.median(loop_mae)),
-        "loop_rmse_mean": float(loop_rmse.mean()),
-    }
+CORONAL_SPLITS = r"""
+GROUP_SIZE = 50  # Consecutive loops kept together in the grouped split.
+rng = np.random.default_rng(SEED)
+n_train, n_validation = int(0.60 * loop_count), int(0.15 * loop_count)
 
 
-model_evidence = regression_evidence(y_test_raw, predictions)
-baseline_evidence = regression_evidence(y_test_raw, training_mean_prediction)
-print("model:", json.dumps(model_evidence, indent=2))
-print("training-mean z-profile baseline:", json.dumps(baseline_evidence, indent=2))
+def by_fraction(order):
+    return (
+        np.sort(order[:n_train]),
+        np.sort(order[n_train : n_train + n_validation]),
+        np.sort(order[n_train + n_validation :]),
+    )
 
-residuals = y_test_raw - predictions
-fig, axes = plt.subplots(1, 2, figsize=(11, 3.5))
-axes[0].hist(residuals.ravel(), bins=60)
-axes[0].set(title="Point-wise residuals", xlabel="observed z − predicted z")
-loop_rmse = np.sqrt(np.mean(residuals**2, axis=1))
-axes[1].hist(loop_rmse, bins=30)
-axes[1].set(title="Loop-wise RMSE", xlabel="RMSE")
+
+group_order = rng.permutation(loop_count // GROUP_SIZE)
+grouped_order = np.concatenate(
+    [np.arange(group * GROUP_SIZE, (group + 1) * GROUP_SIZE) for group in group_order]
+)
+splits = {
+    "random loops": by_fraction(rng.permutation(loop_count)),
+    "grouped loops": by_fraction(grouped_order),
+    "spatial block": by_fraction(np.arange(loop_count)),
+}
+for name, (train, validation, test) in splits.items():
+    assert not set(train) & set(test) and not set(validation) & set(test)
+    print(f"{name:14s} train={len(train):,}  validation={len(validation):,}  test={len(test):,}")
+
+neighbour_gap = np.abs(heights[1:] - heights[:-1]).mean(axis=1)
+print(
+    "median mean-absolute height difference between neighbouring loops: "
+    f"{np.median(neighbour_gap):.3f} (typical apex height {np.median(heights.max(axis=1)):.1f})"
+)
+
+fig, axes = plt.subplots(1, 3, figsize=(13, 4), sharex=True, sharey=True)
+roles = (("train", "0.75"), ("validation", "tab:blue"), ("test", "tab:red"))
+for axis, (name, members) in zip(axes, splits.items()):
+    for (role, color), indices in zip(roles, members):
+        axis.scatter(
+            x_projected[indices, 0], y_projected[indices, 0],
+            s=3, color=color, label=role, rasterized=True,
+        )
+    axis.set(title=name, xlabel="x of first footpoint")
+axes[0].set_ylabel("y of first footpoint")
+axes[0].legend(markerscale=4, loc="lower right")
+fig.suptitle("Where the training, validation, and test loops start")
 plt.tight_layout()
 plt.show()
+"""
 
-fig = plt.figure(figsize=(12, 4))
-for panel, index in enumerate([0, len(y_test_raw) // 2, len(y_test_raw) - 1], start=1):
-    axis = fig.add_subplot(1, 3, panel, projection="3d")
-    axis.plot(
-        x_test_raw[index, :, 0],
-        x_test_raw[index, :, 1],
-        y_test_raw[index],
-        label="observed",
+CORONAL_NORMALIZE = r"""
+def prepare_split(split):
+    train, validation, test = split
+    # Normalization statistics come from the training loops of this split only.
+    feature_mean = features[train].mean(axis=(0, 1), keepdims=True)
+    feature_std = features[train].std(axis=(0, 1), keepdims=True)
+    feature_std[feature_std < 1e-6] = 1.0
+    target_mean = heights[train].mean(axis=0, keepdims=True)
+    target_std = heights[train].std(axis=0, keepdims=True)
+    target_std[target_std < 1e-6] = 1.0
+
+    def scale_x(indices):
+        return ((features[indices] - feature_mean) / feature_std).astype(np.float32)
+
+    def scale_y(indices):
+        return ((heights[indices] - target_mean) / target_std).astype(np.float32)
+
+    return {
+        "x_train": scale_x(train), "y_train": scale_y(train),
+        "x_validation": scale_x(validation), "y_validation": scale_y(validation),
+        "x_test": scale_x(test), "y_test": heights[test],
+        "target_mean": target_mean, "target_std": target_std,
+    }
+"""
+
+CORONAL_EVALUATE = r"""
+def rmse(y_true, y_prediction):
+    return float(mean_squared_error(y_true.ravel(), y_prediction.ravel()) ** 0.5)
+
+
+runs, rows = {}, []
+for name, split in splits.items():
+    data = prepare_split(split)
+    predict, losses = train_regressor(data)
+    predictions = predict(data["x_test"]) * data["target_std"] + data["target_mean"]
+    # Reference: predict the mean training height at every point along the loop.
+    baseline = np.repeat(data["target_mean"], len(split[2]), axis=0)
+    model_rmse, baseline_rmse = rmse(data["y_test"], predictions), rmse(data["y_test"], baseline)
+    runs[name] = {"predictions": predictions, "losses": losses, "test": split[2]}
+    rows.append(
+        {
+            "split": name,
+            "model RMSE": model_rmse,
+            "mean-profile RMSE": baseline_rmse,
+            "model R²": float(r2_score(data["y_test"].ravel(), predictions.ravel())),
+            "skill vs mean profile": 1.0 - model_rmse**2 / baseline_rmse**2,
+            "epochs": len(losses["loss"]),
+        }
     )
-    axis.plot(
-        x_test_raw[index, :, 0],
-        x_test_raw[index, :, 1],
-        predictions[index],
-        label="reconstructed",
-        linestyle="--",
-    )
-    axis.set_title(f"test loop {test_indices[index]}")
-    axis.set_xlabel("x")
-    axis.set_ylabel("y")
-    axis.set_zlabel("z")
-axes = fig.axes
+    print(f"{name}: model RMSE {model_rmse:.2f}, mean-profile RMSE {baseline_rmse:.2f}")
+
+summary = pd.DataFrame(rows).set_index("split")
+display(summary.round(3))
+"""
+
+CORONAL_DIAGNOSTICS = r"""
+fig, axes = plt.subplots(1, 3, figsize=(13, 3.4), sharey=True)
+for axis, (name, run) in zip(axes, runs.items()):
+    axis.plot(run["losses"]["loss"], marker="o", label="training")
+    axis.plot(run["losses"]["val_loss"], marker="o", label="validation")
+    axis.set(title=name, xlabel="Epoch", yscale="log")
+    axis.grid(alpha=0.25)
+axes[0].set_ylabel("MSE (normalized height)")
 axes[0].legend()
 plt.tight_layout()
 plt.show()
 
+grouped = runs["grouped loops"]
+grouped_heights = heights[grouped["test"]]
+loop_rmse = np.sqrt(np.mean((grouped_heights - grouped["predictions"]) ** 2, axis=1))
+examples = np.argsort(loop_rmse)[[len(loop_rmse) // 10, len(loop_rmse) // 2, -len(loop_rmse) // 10]]
+
+fig = plt.figure(figsize=(13, 4))
+for panel, (index, label) in enumerate(zip(examples, ("10th", "50th", "90th")), start=1):
+    loop = grouped["test"][index]
+    axis = fig.add_subplot(1, 3, panel, projection="3d")
+    axis.plot(x_projected[loop], y_projected[loop], heights[loop], label="true")
+    axis.plot(
+        x_projected[loop], y_projected[loop], grouped["predictions"][index],
+        linestyle="--", label="reconstructed",
+    )
+    axis.set(title=f"loop {loop}: {label} percentile RMSE", xlabel="x", ylabel="y", zlabel="z")
+fig.axes[0].legend()
+plt.tight_layout()
+plt.show()
+"""
+
+CORONAL_RECORD = r"""
 print(
     "HELIO_RESULT "
     + json.dumps(
         {
-            "model_point_rmse": model_evidence["point_rmse"],
-            "baseline_point_rmse": baseline_evidence["point_rmse"],
-            "model_loop_rmse": model_evidence["loop_rmse_mean"],
-            "prediction_shape": list(predictions.shape),
-            "split": {"train": [0, 2999], "validation": [3000, 3749], "test": [3750, 4999]},
+            split: {
+                "model_rmse": row["model RMSE"],
+                "baseline_rmse": row["mean-profile RMSE"],
+            }
+            for split, row in summary.to_dict(orient="index").items()
         },
         sort_keys=True,
     )
 )
-assert predictions.shape == y_test_raw.shape
-assert np.isfinite(predictions).all()
+for run in runs.values():
+    assert run["predictions"].shape == (len(run["test"]), point_count)
+    assert np.isfinite(run["predictions"]).all()
 """
 
-
-def coronal_neural_cells(framework: str) -> list[nbformat.NotebookNode]:
-    framework_label = (
-        "Keras 3 — PyTorch Backend" if framework == "keras" else "Native PyTorch"
-    )
-    cells = [
-        md(
-            f"""
-# Coronal-Loop Reconstruction — {framework_label}
-
-This research workflow reconstructs a loop's z profile from its projected
-x/y coordinates and three archived scalar descriptors. It corrects the
-overlapping split in the legacy notebook: loops 0–2999 train, 3000–3749
-validate, and 3750–4999 form the untouched final test set. All normalization is
-fit on training loops only.
-
-In Colab, choose **Runtime → Run all**; the bootstrap verifies each archived
-array.
-"""
-        ),
-        md(
-            """## Imports and deterministic configuration
-
-These tools load the archived loop geometry, evaluate reconstructed heights,
-and produce the diagnostic figures. Fixed seeds make the two implementations
-easier to compare."""
-        ),
-        code(CORONAL_IMPORTS),
-        md(
-            """## Resolve the immutable arrays
-
-The archive stores the projected coordinates, loop descriptors, and target
-heights separately. Each array is checksum-verified before reconstruction."""
-        ),
-        code(dataset_bootstrap_code("coronal-loops", CORONAL_FILES)),
-        md(
-            """## Assemble features and apply the corrected split
-
-Projected coordinates and three scalar descriptors are assembled for each loop.
-Normalization is estimated from loops 0–2999 only; loops 3000–3749 are used for
-validation and loops 3750–4999 remain the final test set."""
-        ),
-        code(CORONAL_PREPARE),
-    ]
-    if framework == "keras":
-        cells.extend(
-            [
-                md(
-                    """## Train the Keras convolutional regressor
-
-The one-dimensional convolutions follow the ordered points along each projected
-loop and return the full normalized height profile."""
-                ),
-                code(
-                    r"""
-os.environ["KERAS_BACKEND"] = "torch"
-import keras
-import torch
-from keras import layers
-
-EPOCHS = 10  # Reduce to 3 or 5 for a quicker run.
-keras.utils.set_random_seed(SEED)
-torch.use_deterministic_algorithms(True)
-assert keras.backend.backend() == "torch"
-# Define the neural network used to reconstruct the loop height profile.
-model = keras.Sequential(
-    [
-        keras.Input(shape=x_train.shape[1:]),
-        layers.Conv1D(32, 25, padding="same", activation="relu"),
-        layers.MaxPooling1D(4),
-        layers.Conv1D(64, 15, padding="same", activation="relu"),
-        layers.MaxPooling1D(4),
-        layers.Conv1D(64, 7, padding="same", activation="relu"),
-        layers.GlobalAveragePooling1D(),
-        layers.Dense(256, activation="relu"),
-        layers.Dense(y_train.shape[1]),
-    ]
-)
-model.compile(optimizer=keras.optimizers.Adam(), loss="mse")
-history = model.fit(
-    x_train,
-    y_train,
-    validation_data=(x_validation, y_validation),
-    epochs=EPOCHS,
-    batch_size=32,
-    callbacks=[
-        keras.callbacks.EarlyStopping(
-            monitor="val_loss", patience=2, restore_best_weights=True
-        )
-    ],
-    verbose=2,
-)
-predictions_scaled = model.predict(x_test, verbose=0)
-predictions = predictions_scaled * target_std + target_mean
-losses = history.history
-"""
-                ),
-            ]
-        )
-    else:
-        cells.extend(
-            [
-                md(
-                    """## Train the PyTorch convolutional regressor
-
-The one-dimensional convolutions follow the ordered points along each projected
-loop and return the full normalized height profile."""
-                ),
-                code(
-                    r"""
+CORONAL_TORCH_MODEL = r"""
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 EPOCHS = 10  # Reduce to 3 or 5 for a quicker run.
-torch.manual_seed(SEED)
+PATIENCE = 3
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")  # Deterministic cuBLAS on GPUs.
 torch.use_deterministic_algorithms(True, warn_only=True)
 DEVICE = torch.device(
     "cuda" if torch.cuda.is_available()
@@ -3303,20 +3712,15 @@ DEVICE = torch.device(
 )
 
 
-# Define the neural network used to reconstruct the loop height profile.
+# Define the neural network used to reconstruct the loop height profile:
+# 1-D convolutions read the ordered points, a dense head returns all heights.
 class LoopRegressor(nn.Module):
-    def __init__(self, output_points):
+    def __init__(self, input_channels, output_points):
         super().__init__()
         self.features = nn.Sequential(
-            nn.Conv1d(5, 32, 25, padding=12),
-            nn.ReLU(),
-            nn.MaxPool1d(4),
-            nn.Conv1d(32, 64, 15, padding=7),
-            nn.ReLU(),
-            nn.MaxPool1d(4),
-            nn.Conv1d(64, 64, 7, padding=3),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool1d(1),
+            nn.Conv1d(input_channels, 32, 25, padding=12), nn.ReLU(), nn.MaxPool1d(4),
+            nn.Conv1d(32, 64, 15, padding=7), nn.ReLU(), nn.MaxPool1d(4),
+            nn.Conv1d(64, 64, 7, padding=3), nn.ReLU(), nn.AdaptiveAvgPool1d(1),
         )
         self.regressor = nn.Sequential(
             nn.Flatten(), nn.Linear(64, 256), nn.ReLU(), nn.Linear(256, output_points)
@@ -3326,99 +3730,216 @@ class LoopRegressor(nn.Module):
         return self.regressor(self.features(inputs.transpose(1, 2)))
 
 
-model = LoopRegressor(y_train.shape[1]).to(DEVICE)
-optimizer = torch.optim.Adam(model.parameters())
-loss_function = nn.MSELoss()
-loader = DataLoader(
-    TensorDataset(torch.from_numpy(x_train), torch.from_numpy(y_train)),
-    batch_size=32,
-    shuffle=True,
-    generator=torch.Generator().manual_seed(SEED),
-)
-training_losses, validation_losses = [], []
-best_state, best_loss, patience_left = None, float("inf"), 2
-for epoch in range(EPOCHS):
-    model.train()
-    batch_losses = []
-    for batch_x, batch_y in loader:
-        optimizer.zero_grad()
-        loss = loss_function(model(batch_x.to(DEVICE)), batch_y.to(DEVICE))
-        loss.backward()
-        optimizer.step()
-        batch_losses.append(loss.item())
+def train_regressor(data):
+    torch.manual_seed(SEED)
+    model = LoopRegressor(features.shape[2], point_count).to(DEVICE)
+    optimizer = torch.optim.Adam(model.parameters())
+    loss_function = nn.MSELoss()
+    loader = DataLoader(
+        TensorDataset(torch.from_numpy(data["x_train"]), torch.from_numpy(data["y_train"])),
+        batch_size=32,
+        shuffle=True,
+        generator=torch.Generator().manual_seed(SEED),
+    )
+    x_validation = torch.from_numpy(data["x_validation"]).to(DEVICE)
+    y_validation = torch.from_numpy(data["y_validation"]).to(DEVICE)
+    losses = {"loss": [], "val_loss": []}
+    best_state, best_loss, stale_epochs = None, float("inf"), 0
+    for epoch in range(EPOCHS):
+        model.train()
+        total = 0.0
+        for batch_x, batch_y in loader:
+            optimizer.zero_grad()
+            loss = loss_function(model(batch_x.to(DEVICE)), batch_y.to(DEVICE))
+            loss.backward()
+            optimizer.step()
+            total += loss.item() * len(batch_x)
+        model.eval()
+        with torch.no_grad():
+            validation_loss = loss_function(model(x_validation), y_validation).item()
+        losses["loss"].append(total / len(loader.dataset))
+        losses["val_loss"].append(validation_loss)
+        if validation_loss < best_loss:
+            best_loss, stale_epochs = validation_loss, 0
+            best_state = {key: value.detach().clone() for key, value in model.state_dict().items()}
+        else:
+            stale_epochs += 1
+            if stale_epochs >= PATIENCE:
+                break
+    model.load_state_dict(best_state)
     model.eval()
-    with torch.no_grad():
-        val_loss = loss_function(
-            model(torch.from_numpy(x_validation).to(DEVICE)),
-            torch.from_numpy(y_validation).to(DEVICE),
-        ).item()
-    training_losses.append(float(np.mean(batch_losses)))
-    validation_losses.append(val_loss)
-    print(f"epoch {epoch + 1}: loss={training_losses[-1]:.4f}, val={val_loss:.4f}")
-    if val_loss < best_loss:
-        best_loss = val_loss
-        best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
-        patience_left = 2
-    else:
-        patience_left -= 1
-        if patience_left == 0:
-            break
-model.load_state_dict(best_state)
-model.to(DEVICE).eval()
-with torch.no_grad():
-    predictions_scaled = model(torch.from_numpy(x_test).to(DEVICE)).cpu().numpy()
-predictions = predictions_scaled * target_std + target_mean
-losses = {"loss": training_losses, "val_loss": validation_losses}
+
+    def predict(x):
+        with torch.no_grad():
+            return model(torch.from_numpy(x).to(DEVICE)).cpu().numpy()
+
+    return predict, losses
 """
-                ),
-            ]
-        )
-    cells.extend(
+
+CORONAL_KERAS_MODEL = r"""
+os.environ["KERAS_BACKEND"] = "torch"
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")  # Deterministic cuBLAS on GPUs.
+import keras
+import torch
+from keras import layers
+
+EPOCHS = 10  # Reduce to 3 or 5 for a quicker run.
+PATIENCE = 3
+torch.use_deterministic_algorithms(True, warn_only=True)
+assert keras.backend.backend() == "torch"
+
+
+def train_regressor(data):
+    keras.utils.set_random_seed(SEED)
+    # Define the neural network used to reconstruct the loop height profile:
+    # 1-D convolutions read the ordered points, a dense head returns all heights.
+    model = keras.Sequential(
         [
-            md(
-                """## Inspect learning curves
-
-Training and validation losses track reconstruction error in normalized height.
-Their separation indicates how well the fitted mapping transfers to held-out loops."""
-            ),
-            code(
-                r"""
-fig, ax = plt.subplots(figsize=(7, 3.5))
-ax.plot(losses["loss"], label="training")
-ax.plot(losses["val_loss"], label="validation")
-ax.set(title="Normalized z-profile loss", xlabel="Epoch", ylabel="MSE")
-ax.legend()
-plt.show()
-"""
-            ),
-            md(
-                """## Compare with the training-mean profile
-
-The learned reconstruction is compared with the mean height profile from the
-training loops. Residual and three-dimensional views show where the geometry is
-captured and where it is missed."""
-            ),
-            code(CORONAL_EVIDENCE),
-            md(
-                """
-## How to read this result
-
-The reconstruction is evaluated only against the supplied arrays. Their
-archive does not contain enough provenance to make claims about broader solar
-populations, measurement uncertainty, or out-of-distribution performance.
-"""
-            ),
+            keras.Input(shape=data["x_train"].shape[1:]),
+            layers.Conv1D(32, 25, padding="same", activation="relu"),
+            layers.MaxPooling1D(4),
+            layers.Conv1D(64, 15, padding="same", activation="relu"),
+            layers.MaxPooling1D(4),
+            layers.Conv1D(64, 7, padding="same", activation="relu"),
+            layers.GlobalAveragePooling1D(),
+            layers.Dense(256, activation="relu"),
+            layers.Dense(point_count),
         ]
     )
+    model.compile(optimizer=keras.optimizers.Adam(), loss="mse")
+    history = model.fit(
+        data["x_train"],
+        data["y_train"],
+        validation_data=(data["x_validation"], data["y_validation"]),
+        epochs=EPOCHS,
+        batch_size=32,
+        callbacks=[
+            keras.callbacks.EarlyStopping(
+                monitor="val_loss", patience=PATIENCE, restore_best_weights=True
+            )
+        ],
+        verbose=0,
+    )
+
+    def predict(x):
+        return model.predict(x, batch_size=256, verbose=0)
+
+    return predict, history.history
+"""
+
+
+def coronal_neural_cells(framework: str) -> list[nbformat.NotebookNode]:
+    framework_label = "Keras 3" if framework == "keras" else "PyTorch"
+    cells = [
+        md(
+            f"""
+# Coronal-Loop Reconstruction: {framework_label}
+
+EUV imagers see coronal loops only in projection. This notebook asks
+whether a network can recover the height profile $z(s)$ of a loop from its
+projected shape and three scalar descriptors, following Chifu and Gafeira
+(2021). The data are 5,000 loops, each sampled at 1,500 points.
+
+The answer depends on which loops the model is tested on. Neighbouring loops
+in the archive are nearly identical, and the archive is ordered by position,
+so we compare three splits: random loops, groups of 50 consecutive loops, and
+one contiguous spatial block.
+"""
+        ),
+        md(
+            """## Imports
+
+A fixed seed makes repeated runs comparable."""
+        ),
+        code(CORONAL_IMPORTS, "hide-input"),
+        md(
+            """## Load the loops
+
+The arrays are downloaded once and checked against their SHA-256 checksums."""
+        ),
+        code(dataset_bootstrap_code("coronal-loops", CORONAL_FILES), "hide-input"),
+        md(
+            """## Describe each loop by its shape
+
+A loop's height depends on its geometry, not on where it sits on the disk. We
+therefore rotate and translate each projected loop into a frame fixed by its
+footpoints and add the archived projected length, footpoint separation, and
+apex angle as extra channels. The target is the height at each of the 1,500
+points."""
+        ),
+        code(CORONAL_PREPARE),
+        md(
+            """## Three ways to split the loops
+
+- **Random loops** assigns individual loops at random. Because a loop's
+  neighbours are near-copies of it, the test set contains close relatives of
+  training loops, and the score is optimistic.
+- **Grouped loops** assigns blocks of 50 consecutive loops at random. Close
+  relatives stay on the same side of the split, while every region still
+  appears in training. This is our main estimate.
+- **Spatial block** keeps the archive order: the first 60% train, the next 15%
+  validate, and the last 25% test. The test loops come from a region the model
+  has never seen, so this measures extrapolation."""
+        ),
+        code(CORONAL_SPLITS),
+        md(
+            """## Normalize within each split
+
+Inputs are standardized per channel and heights per point, using the training
+loops of the split in question."""
+        ),
+        code(CORONAL_NORMALIZE),
+        md(
+            f"""## Define the {framework_label} regressor
+
+Three convolution and pooling stages summarize the loop; a dense layer maps
+that summary to all 1,500 heights. Training stops when the validation loss has
+not improved for three epochs, and the best state is restored."""
+        ),
+        code(CORONAL_KERAS_MODEL if framework == "keras" else CORONAL_TORCH_MODEL),
+        md(
+            """## Train and evaluate under each split
+
+The reference prediction is the mean training height at each point along the
+loop. A skill above zero means the model beats that profile; R² is computed
+over all points of all test loops."""
+        ),
+        code(CORONAL_EVALUATE),
+        md(
+            """## Learning curves and example reconstructions
+
+The upper panels compare training and validation loss for each split. The
+lower panels show grouped-split test loops at the 10th, 50th, and 90th
+percentiles of loop RMSE."""
+        ),
+        code(CORONAL_DIAGNOSTICS),
+        code(CORONAL_RECORD, "remove-cell"),
+        md(
+            """
+## What the results show
+
+With random loops, the network appears almost perfect. That number is inflated:
+most test loops have a neighbour in the training set whose heights differ by
+about 0.2, or 2% of a typical apex height. Grouping neighbouring loops removes this leak;
+the grouped score is the honest estimate for loops drawn from the regions the
+model was trained on.
+
+The spatial block is a different question. Its test loops are shorter and
+relatively taller than typical training loops, and the model does not beat the
+mean profile there. More data or physical constraints, not a larger network,
+are what would be needed to reconstruct loops from an unseen region.
+"""
+        ),
+    ]
     return cells
 
 
 def generate_coronal_module() -> None:
     directory = ROOT / "heliophysics" / "research-case-studies" / "coronal-loop-reconstruction"
     for framework in ("keras", "pytorch"):
-        framework_title = "Keras 3 on Torch" if framework == "keras" else "Native PyTorch"
+        framework_title = "Keras 3" if framework == "keras" else "PyTorch"
         notebook = make_notebook(
-            title=f"Coronal-Loop Reconstruction — {framework_title}",
+            title=f"Coronal-Loop Reconstruction: {framework_title}",
             module_id="coronal-loop-reconstruction",
             framework=framework,
             artifact="demo",

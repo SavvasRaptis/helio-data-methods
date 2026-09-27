@@ -73,7 +73,7 @@ def reduce_notebook_for_test(
         "SEARCH_EPOCHS = 10  # Reduce to 1 or 2 for quicker trials.": (
             "SEARCH_EPOCHS = 1"
         ),
-        "ROUNDS = 100  # Reduce to 10 or 25 for a quicker run.": "ROUNDS = 10",
+        "ROUNDS = 300  # Reduce to 25 or 50 for a quicker run.": "ROUNDS = 10",
         "EXAMPLE_ROUNDS = 50  # Reduce to 10 or 25 for a quicker comparison.": (
             "EXAMPLE_ROUNDS = 10"
         ),
@@ -155,18 +155,6 @@ def reduce_notebook_for_test(
         if is_coronal and "point_slice = slice(None)" in source:
             source = source.replace(
                 "point_slice = slice(None)", "point_slice = slice(None, None, 10)"
-            )
-            source = source.replace(
-                "train_indices = np.arange(0, 3000)",
-                "train_indices = np.arange(0, 300)",
-            )
-            source = source.replace(
-                "validation_indices = np.arange(3000, 3750)",
-                "validation_indices = np.arange(3000, 3150)",
-            )
-            source = source.replace(
-                "test_indices = np.arange(3750, 5000)",
-                "test_indices = np.arange(3750, 3900)",
             )
         cell.source = source
 

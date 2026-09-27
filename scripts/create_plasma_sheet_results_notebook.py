@@ -37,28 +37,25 @@ cells = [
         r"""
         # Plasma-Sheet Modeling
 
-        This results demonstration is adapted from *Machine Learning Modeling of
-        Earth's Plasma Sheet using Multi-Spacecraft Observations*, a manuscript
-        currently under review. The broader study uses decades of Geotail and
-        Magnetospheric Multiscale observations to investigate how data selection,
-        model design, and spacecraft coverage affect statistical descriptions of
-        plasma-sheet density and temperature.
+        This page compares a machine-learning model of Earth's plasma sheet with
+        the empirical Tsyganenko-Mukai model (TM03). It is adapted from *Machine
+        Learning Modeling of Earth's Plasma Sheet using Multi-Spacecraft
+        Observations* (manuscript under review), which uses decades of Geotail and
+        Magnetospheric Multiscale observations to study how data selection, model
+        design, and spacecraft coverage shape statistical models of plasma-sheet
+        density and temperature.
 
-        PRIME stands for **Probabilistic Regressor for Input to the
-        Magnetosphere Estimation**. The original
-        [PRIME model](https://www.frontiersin.org/journals/astronomy-and-space-sciences/articles/10.3389/fspas.2023.1250779/full)
-        uses the time history measured by monitors at L1 to predict near-Earth
-        solar-wind conditions together with their uncertainties. PRIME-SH
-        extends this data-driven probabilistic approach to the magnetosheath.
-        PRIME-PS applies the broader modeling family to plasma-sheet density and
-        ion temperature using multi-spacecraft observations.
+        PRIME (Probabilistic Regressor for Input to the Magnetosphere Estimation)
+        is a family of neural networks that predict a quantity together with its
+        uncertainty. The original
+        [PRIME](https://www.frontiersin.org/journals/astronomy-and-space-sciences/articles/10.3389/fspas.2023.1250779/full)
+        propagates solar-wind measurements from L1 to near-Earth space, PRIME-SH
+        models the magnetosheath, and PRIME-PS models plasma-sheet density and ion
+        temperature. Code for all three is in the
+        [PRIME repository](https://github.com/connor-obrien888/prime).
 
-        The [PRIME GitHub repository](https://github.com/connor-obrien888/prime)
-        provides code for working with the solar-wind, magnetosheath, and
-        plasma-sheet models. This page focuses only on saved PRIME-PS results;
-        it does not define or train the model.
-
-        We load versioned saved outputs and ask two questions:
+        No model is trained here. We load saved PRIME-PS and TM03 outputs and ask
+        two questions:
 
         1. How do PRIME-PS and the analytical TM03 model compare on the same
            chronological ion-temperature test samples?
@@ -67,7 +64,6 @@ cells = [
 
         """
     ),
-    md("## Runtime dependency check"),
     code(
         """
         import importlib.util
@@ -90,9 +86,9 @@ cells = [
         print("runtime dependency check passed")
         """,
         "provided",
-        "hide-input",
+        "remove-cell",
     ),
-    code("%matplotlib inline", "provided", "hide-input"),
+    code("%matplotlib inline", "provided", "remove-cell"),
     code(
         r"""
         import hashlib
@@ -193,9 +189,10 @@ cells = [
         r"""
         ## 1. Chronological ion-temperature comparison
 
-        Both models are evaluated on the same timestamps. TM03 has missing output
-        for some chronological test rows, so a common finite mask leaves 46,595
-        samples. This avoids giving either model a different evaluation population.
+        The test set is the final 20% of the observations in time, so it follows
+        the training period. TM03 returns no value for some of these samples; we
+        keep only the 46,595 samples where both models have a prediction, so both
+        are scored on exactly the same population.
         """
     ),
     code(
@@ -239,8 +236,9 @@ cells = [
         r"""
         ### Compare the temperature predictions
 
-        Both panels use the same axes and count scale. This makes the spread,
-        systematic offsets, and behavior at high ion temperature easy to compare.
+        Both panels use the same axes and count scale, so spread, systematic
+        offsets, and behaviour at high temperature can be compared directly. The
+        dashed line marks perfect agreement.
         """
     ),
     code(
@@ -294,26 +292,26 @@ cells = [
     ),
     md(
         r"""
-        ### What changed between the models?
+        ### What the scatter plots show
 
-        On these common chronological samples, PRIME-PS has lower MAE and RMSE
-        and higher $R^2$ and correlation than TM03. Both panels also show a
-        compression of the hottest observed temperatures toward the middle of the
-        predicted range.
+        PRIME-PS has lower MAE and RMSE and a higher $R^2$ and correlation than
+        TM03 on the same samples. Neither model reproduces the hottest plasma:
+        both compress the highest observed temperatures toward the middle of the
+        predicted range, so errors grow with temperature.
         """
     ),
     md(
         r"""
         ## 2. Density structure under high solar-wind density and northward IMF
 
-        The second comparison is not another test-set scatter plot. It evaluates
-        both saved model outputs on the same synthetic equatorial grid with
+        This comparison uses no observations. Both models are evaluated on the
+        same equatorial grid for one fixed solar-wind condition,
         $n_{SW}=20\,\mathrm{cm}^{-3}$ and $B_{z,SW}=+5\,\mathrm{nT}$.
 
-        The PRIME-PS field was cropped to the TM03 domain, averaged from a 0.1 to
-        0.5 $R_E$ grid, and lightly smoothed with a one-cell Gaussian filter, as
-        specified in the supplied figure workflow. A common validity mask and one
-        shared color scale make the two panels directly comparable.
+        The PRIME-PS field was cropped to the TM03 domain, averaged from a
+        0.1 $R_E$ to a 0.5 $R_E$ grid, and smoothed with a one-cell Gaussian
+        filter. A common validity mask and one shared colour scale make the two
+        panels directly comparable.
         """
     ),
     code(
@@ -378,7 +376,7 @@ cells = [
     ),
     md(
         r"""
-        ### What changed in the spatial structure?
+        ### What the maps show
 
         PRIME-PS produces a stronger cross-tail, $Y$-dependent density structure
         under this driving condition, while TM03 remains comparatively symmetric.
@@ -388,11 +386,11 @@ cells = [
     ),
     md(
         r"""
-        ## Try it yourself in Colab
+        ## Try it yourself
 
         1. Change the scatter limits from 0-12 to 0-19 keV and inspect how the sparse
            high-temperature tail changes the visual impression. Then ask which
-           metrics would better expose performance for extremes—for example,
+           metrics would better expose performance for extremes, for example
            tail-conditioned MAE/RMSE above a threshold chosen in advance, tail bias,
            or precision and recall for exceeding that threshold.
         2. Rebuild the compact dataset with `--gaussian-sigma 0` after extending the

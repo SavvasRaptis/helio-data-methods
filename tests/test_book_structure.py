@@ -66,7 +66,7 @@ def test_teaching_workflows_offer_exploration_without_controlled_studies() -> No
         if metadata["module_id"] == "tree-models":
             assert "example-thought" in tags
             assert source.count("HELIO_EXPERIMENT") == 1
-            assert "## Example thought" in source
+            assert "## Experiment: tree depth" in source
         else:
             assert "guided-experiment" not in tags
             assert "example-thought" not in tags
@@ -239,12 +239,14 @@ def test_software_toolkit_is_published_first() -> None:
     toc = (repository_root / "_toc.yml").read_text(encoding="utf-8")
     toolkit = "general-ml/foundations/software-toolkit/index"
     assert toolkit in toc
-    for hidden_page in (
-        "general-ml/foundations/machine-learning-problems/index",
+    assert "general-ml/foundations/machine-learning-problems/index" not in toc
+    published = [
+        "general-ml/foundations/software-toolkit/index",
         "general-ml/foundations/data-splits-and-leakage/index",
         "general-ml/foundations/model-evaluation/index",
-    ):
-        assert hidden_page not in toc
+    ]
+    positions = [toc.index(page) for page in published]
+    assert positions == sorted(positions)
     content = (repository_root / f"{toolkit}.md").read_text(encoding="utf-8")
     for package in ("pandas", "PyTorch", "scikit-learn", "Keras 3"):
         assert package in content
