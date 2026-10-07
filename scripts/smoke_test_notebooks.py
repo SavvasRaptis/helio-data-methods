@@ -65,6 +65,7 @@ def reduce_notebook_for_test(
         return
 
     replacements = {
+        "HEAD_EPOCHS = 30": "HEAD_EPOCHS = 1",
         "EPOCHS = 5  # Reduce to 1 or 2 for a quicker run.": "EPOCHS = 1",
         "EPOCHS = 10  # Reduce to 1 or 2 for a quicker run.": "EPOCHS = 1",
         "EPOCHS = 25  # Reduce to 1 or 2 for a quicker run.": "EPOCHS = 1",

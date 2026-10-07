@@ -99,7 +99,7 @@ PYTORCH_SUGGESTIONS = {
     "transfer-learning": (
         "add a 250-image subset to `SUBSET_SIZES` to see how far the frozen features carry",
         "replace the head with a single linear layer, a logistic regression on the VGG16 features",
-        "unfreeze the last VGG16 block, train it with a learning rate of `1e-5`, and compare with the frozen model",
+        "for a larger extension, replace cached-feature training with an end-to-end image model, unfreeze the last VGG16 block, and try a learning rate of `1e-5`",
     ),
     "hyperparameter-tuning": (
         "rerun the search with a different sampler seed and see whether the same configuration wins",

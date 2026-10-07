@@ -20,7 +20,8 @@ descriptors: projected length, footpoint separation, and apex angle.
 The 5,000 saved loops are ordered by position, and neighbouring loops are
 nearly identical. The notebooks therefore score the same model under three
 splits: random loops, which leaks near-copies into the test set; groups of
-50 consecutive loops, the honest estimate for regions seen in training; and
+50 consecutive loops, a sensitivity check that can still share similar loops
+across group boundaries; and
 one contiguous spatial block, which tests extrapolation to a new region. The
 network beats the mean height profile clearly under the first two and fails
 under the third.

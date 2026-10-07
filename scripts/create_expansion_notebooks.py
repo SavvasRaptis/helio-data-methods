@@ -1457,14 +1457,12 @@ The confusion matrix shows which classes are mistaken for which."""
         md(
             """## What the results show
 
-The deeper network wins on validation accuracy. Its training accuracy keeps
-rising long after validation accuracy has levelled off, the signature of
-overfitting, so restoring the best validation epoch matters more here than it
-did for MNIST. Errors are not spread evenly: the animal classes, cats in
-particular, are confused with one another far more often than the vehicle
-classes. Data
-augmentation (random flips and crops of the training images) is the usual
-next step for closing the gap."""
+In both saved runs, validation selects the deeper network. Training accuracy
+continues to improve while validation accuracy levels off, and the best
+checkpoint occurs before the final epoch. Cats have the lowest test recall.
+The models also receive different training budgets (5 versus 25 epochs), so
+the comparison does not isolate network depth. Try training-image flips and
+crops as a next step, keeping validation and test images unchanged."""
         ),
     ]
 
@@ -1796,8 +1794,8 @@ def make_head():
 
 TRANSFER_COMPARISON = r"""
 rows, heads = [], {}
-for size in SUBSET_SIZES:
-    subset = np.arange(min(size, len(y_train)))  # The training order is already shuffled.
+for size in sorted({min(size, len(y_train)) for size in SUBSET_SIZES}):
+    subset = np.arange(size)  # The training order is already shuffled.
     head = make_head()
     head_history = fit(
         head, HEAD_EPOCHS,
@@ -1827,7 +1825,7 @@ for column in comparison:
     ax.plot(comparison.index, comparison[column], marker="o", label=column)
 ax.set(
     xscale="log", xlabel="Labelled training images", ylabel="Best validation accuracy",
-    title="Transfer learning pays most when labels are scarce",
+    title="Validation accuracy versus training-set size",
 )
 ax.legend()
 ax.grid(alpha=0.25)
@@ -1899,7 +1897,9 @@ for 10 epochs."""
             """## Train both on growing subsets
 
 For each subset size, both models see the same training images and are
-scored on the full validation set. The test set is not used here."""
+scored on the full validation set. The frozen-feature head receives 30 epochs
+and the scratch CNN 10; this compares two practical training setups, not the
+effect of pretraining alone. The test set is not used here."""
         ),
         code(TRANSFER_COMPARISON),
         md(
@@ -1908,21 +1908,21 @@ scored on the full validation set. The test set is not used here."""
 The head trained on all 45,000 images is evaluated once."""
         ),
         code(
-            "model = heads[SUBSET_SIZES[-1]]\n"
+            "model = heads[max(heads)]\n"
             + image_evaluation_code(images="x_test", inputs="features_test")
         ),
         code(IMAGE_RECORD, "remove-cell"),
         md(
             """## What the results show
 
-The experiment tests a specific prediction. With 1,000 labelled images, the
-frozen ImageNet features should give a better classifier than a network that
-must learn its filters from those images alone. As the training set grows,
-the network trained from scratch should close the gap, because it can learn
-features matched to small CIFAR images instead of reusing features learned
-on large photographs. Check the table against both statements. If the gap
-persists at 45,000 images, fine-tuning the last VGG16 block instead of
-keeping all of it frozen is the natural next step."""
+In the saved runs, the frozen VGG16 features give higher validation accuracy
+at all three training-set sizes. Their advantage is smaller at 45,000 images
+than at either smaller subset, although the changes are not monotonic in
+both implementations. The head and scratch network have different training
+budgets; this is not a controlled measurement of pretraining alone.
+
+Each library uses its own ImageNet VGG16 weights and matching preprocessing,
+so the PyTorch and Keras scores need not match."""
         ),
     ]
 
@@ -2787,8 +2787,9 @@ def verification_scores(y_true, probability, threshold):
 
 
 def choose_threshold(y_true, probability, score):
-    # Pick the probability threshold that maximizes `score` on validation data.
-    candidates = np.unique(np.quantile(probability, np.linspace(0.5, 0.999, 400)))
+    # Test every distinct decision, including all-positive and all-negative.
+    # Ascending thresholds resolve equal scores in favour of the lowest threshold.
+    candidates = np.append(np.unique(probability), float(np.max(probability)) + 1.0)
     values = [verification_scores(y_true, probability, t)[score] for t in candidates]
     return float(candidates[int(np.argmax(values))])
 
@@ -2908,8 +2909,9 @@ in space-weather verification, computed from hits, misses, and false alarms:
 
 A probabilistic model needs a threshold to issue yes/no forecasts. We choose
 two on the validation set, one maximizing TSS and one maximizing HSS, and
-apply both unchanged to the test set. With only 23 test events, a bootstrap
-shows how far each score could move by chance."""
+apply both unchanged to the test set. With only 23 test events, a sample-level
+bootstrap illustrates sampling variability for this fitted model and threshold;
+it does not account for dependence between samples from the same event."""
 
 SEP_RESULTS_TEXT = """## Evaluate on the supplied test set
 
@@ -3225,8 +3227,8 @@ preprocessing step."""
                     """## Repeated stratified cross-validation
 
 Five folds, repeated three times with different shuffles, give 15 estimates.
-Each fold keeps the 1.3% event rate. The threshold is fixed at 0.5 here so
-that the spread reflects the data partition alone."""
+Each fold approximately preserves the 1.3% event rate. The threshold stays
+at 0.5; both the partition and the model seed change between fits."""
                 ),
                 code(
                     r"""
@@ -3300,11 +3302,10 @@ print(
                     """
 ## What the results show
 
-The fold-to-fold range is the honest uncertainty on any single split. A
-difference between two models smaller than this range is not evidence that
-one is better. These folds are still sample-level: without event
-identifiers, they cannot detect leakage between samples from the same event,
-so the scores remain an upper bound on performance for unseen events.
+The spread shows sensitivity to sample partitions and model seeds, not a
+confidence interval for performance. The folds overlap and are not independent
+experiments. Without event identifiers, this analysis cannot establish
+performance on previously unseen events.
 """
                 ),
             ]
@@ -3396,12 +3397,10 @@ print(
                 md(
                     """## What the results show
 
-Importance falls off gradually from the top feature rather than resting on
-one or two predictors. The ranking is largely preserved under a new seed (a
-rank correlation near 0.96, with most of the top ten features shared), so
-the model's reliance on these features is not an accident of one fit. What those features measure cannot be recovered from
-this archive. Correlated predictors can also share or swap attribution, so a
-low rank does not mean a feature is irrelevant."""
+The two seed runs share most of their top-ten features, although the full
+ranking changes. This checks stability across two fits, not physical meaning:
+what the anonymous features measure cannot be recovered from this archive.
+Correlated predictors can share or swap attribution."""
                 ),
             ]
         )
@@ -3414,13 +3413,10 @@ low rank does not mean a feature is irrelevant."""
                 md(
                     """## What the results show
 
-The two validation-chosen thresholds differ by almost two orders of
-magnitude, and they produce very different forecasts: one catches nearly
-every event at the cost of about five false alarms per hit, the other issues
-few false alarms but misses about half of the events. Compare models using
-the bootstrap intervals rather than the point values: with 23 test events,
-differences of a few hundredths in TSS are within the noise. As in the neural notebooks, the split is by
-sample, not by event, so the scores are likely optimistic."""
+The TSS-selected threshold catches more events but issues many more false
+alarms. The HSS-selected threshold reduces false alarms while missing more
+events. With just 23 test events, read these counts alongside the sample-level
+bootstrap intervals; they do not establish performance on independent events."""
                 ),
             ]
         )
@@ -3874,9 +3870,9 @@ points."""
 - **Random loops** assigns individual loops at random. Because a loop's
   neighbours are near-copies of it, the test set contains close relatives of
   training loops, and the score is optimistic.
-- **Grouped loops** assigns blocks of 50 consecutive loops at random. Close
-  relatives stay on the same side of the split, while every region still
-  appears in training. This is our main estimate.
+- **Grouped loops** assigns blocks of 50 consecutive loops at random. Loops
+  within each block stay together, but similar loops may cross its boundaries.
+  This is a split-sensitivity check, not a guarantee of independent regions.
 - **Spatial block** keeps the archive order: the first 60% train, the next 15%
   validate, and the last 25% test. The test loops come from a region the model
   has never seen, so this measures extrapolation."""
@@ -3920,14 +3916,14 @@ percentiles of loop RMSE."""
 
 With random loops, the network appears almost perfect. That number is inflated:
 most test loops have a neighbour in the training set whose heights differ by
-about 0.2, or 2% of a typical apex height. Grouping neighbouring loops removes this leak;
-the grouped score is the honest estimate for loops drawn from the regions the
-model was trained on.
+about 0.2, or 2% of a typical apex height. Grouping 50 consecutive loops tests
+sensitivity to the split, but similar loops can still cross group boundaries;
+it does not establish independent test regions.
 
 The spatial block is a different question. Its test loops are shorter and
 relatively taller than typical training loops, and the model does not beat the
-mean profile there. More data or physical constraints, not a larger network,
-are what would be needed to reconstruct loops from an unseen region.
+mean profile there. These runs do not establish which model or data changes
+would improve extrapolation.
 """
         ),
     ]
